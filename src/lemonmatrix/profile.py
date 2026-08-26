@@ -1,7 +1,7 @@
 """Profile discovery and local storage.
 
 A profile is LemonMatrix's record of one Lemonade instance: where to reach it,
-plus the auto-discovered environment fingerprint (idea.md's "fixed facts").
+plus the auto-discovered environment fingerprint (IDEA.md's "fixed facts").
 
 Confirmed against a real /api/v1/system-info response (Ubuntu 22.04, 7x NVIDIA
 L4, Lemonade 11.6.0): per-device info (cpu, amd_gpu, nvidia_gpu, amd_npu) lives

@@ -3,8 +3,8 @@
 Lemonade holds only one model in its LLM slot at a time (confirmed live:
 `max_models: {"llm": 1, ...}`), so "run all these backends" can't be
 parallelized against a single profile -- it has to be a sequential queue.
-This makes idea.md's sweep model literal: one profile, many result rows,
-run one at a time, each row independent (idea.md: an invalid run is shown
+This makes IDEA.md's sweep model literal: one profile, many result rows,
+run one at a time, each row independent (IDEA.md: an invalid run is shown
 but never ranked, not one that aborts the batch).
 """
 

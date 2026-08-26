@@ -249,7 +249,7 @@ def create_app(results_dir: str | Path = "results") -> Flask:
         results = list_results(results_dir)
 
         # "valid_only" defaults to on: invalid runs are meant to be visible on
-        # request, not by default (idea.md's own ranking-integrity gap list).
+        # request, not by default (IDEA.md's own ranking-integrity gap list).
         # A plain absent-checkbox can't distinguish "never filtered" from "the
         # user explicitly unchecked it", so the filter form carries a hidden
         # "filtered" marker -- once present, the checkbox's actual state is
@@ -551,7 +551,7 @@ def create_app(results_dir: str | Path = "results") -> Flask:
         form = request.form
         run_type = form.get("run_type", "model").strip() or "model"
 
-        # OS is a fixed fact of the profile (idea.md: a different OS is a
+        # OS is a fixed fact of the profile (IDEA.md: a different OS is a
         # different profile, not a per-run setting) -- always derived from
         # the profile's own discovered environment, never taken from the
         # form, so there is nothing for a user to pick inconsistently here.

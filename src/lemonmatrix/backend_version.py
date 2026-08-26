@@ -10,7 +10,7 @@ could be downloaded, so it must not be reported as if it were active.
 
 The mapping from a free-text --backend string (there is no enum for it in
 the schema) to a (recipe, backend_key) pair is inherently a guess for
-hand-typed strings -- BACKEND_ALIASES covers idea.md's example strings
+hand-typed strings -- BACKEND_ALIASES covers IDEA.md's example strings
 ("llama.cpp-vulkan") confirmed against the real recipes tree. capabilities.py
 instead generates canonical "<recipe_key>-<backend_key>" strings directly
 from Lemonade's own keys (e.g. "llamacpp-vulkan", no dot) for the dashboard's

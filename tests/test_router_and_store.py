@@ -107,7 +107,7 @@ def test_router_run_is_marked_valid(fake_lemonade):
 def test_router_run_skips_device_verification(fake_lemonade, monkeypatch):
     # A router's compute_engine is "router" -- there is no single physical
     # device to verify (the downstream model's engine varies per routed
-    # request, per idea.md), so a device report that would fail a model
+    # request, per IDEA.md), so a device report that would fail a model
     # run's check must not affect a router run's validity.
     import conftest
 

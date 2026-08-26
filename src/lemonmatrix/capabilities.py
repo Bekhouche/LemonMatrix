@@ -6,7 +6,7 @@ backends Lemonade can run on this instance (from "recipes"), filtered to
 states that can actually run ("installed" or "installable" -- "unsupported"
 never can) and to this host's OS. Backend strings here are Lemonade's own
 "<recipe_key>-<backend_key>" (e.g. "llamacpp-vulkan") confirmed against a
-real response -- NOT idea.md's example strings ("llama.cpp-vulkan"), since
+real response -- NOT IDEA.md's example strings ("llama.cpp-vulkan"), since
 the real recipe key is "llamacpp", with no dot, and there is no 1:1 mapping
 back from the pretty example strings to arbitrary recipe keys in general.
 backend_version.py's alias table is kept separately for those example

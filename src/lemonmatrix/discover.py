@@ -6,7 +6,7 @@ told where to look. What IS reliable: the unversioned GET /live liveness
 probe (https://lemonade-server.ai/docs/api/lemonade/) and Lemonade's own
 documented port history/quick-select list, which makes localhost scanning
 cheap and accurate. Subnet scanning is offered as an explicit opt-in for the
-idea.md "fleet of LAN machines" scenario, since probing hosts you don't own
+IDEA.md "fleet of LAN machines" scenario, since probing hosts you don't own
 is a different kind of action than checking your own loopback interface.
 """
 

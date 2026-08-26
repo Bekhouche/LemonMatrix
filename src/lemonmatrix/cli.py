@@ -425,7 +425,7 @@ def run(
 
     client = LemonadeClient(prof.base_url, api_key=prof.api_key, timeout=BENCH_TIMEOUT)
 
-    # OS is a fixed fact of the profile (idea.md: a different OS is a
+    # OS is a fixed fact of the profile (IDEA.md: a different OS is a
     # different profile, not a per-run setting), so it is always derived
     # from the profile's own discovered environment -- there is no --os flag.
     run_os = host_os(prof.environment)

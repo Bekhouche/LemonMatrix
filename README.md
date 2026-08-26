@@ -2,7 +2,7 @@
 
 A benchmarking control plane for [Lemonade](https://lemonade-server.ai) instances.
 One profile = one Lemonade instance, auto-discovered and reused as the environment
-fingerprint for every run on that machine. See [idea.md](idea.md) for the full
+fingerprint for every run on that machine. See [IDEA.md](IDEA.md) for the full
 data model and [schema/result.schema.json](schema/result.schema.json) for the
 canonical result schema.
 
@@ -38,7 +38,7 @@ lemonmatrix dashboard
 ```
 
 `lemonmatrix profile detect --subnet 192.168.1.0/24` extends the scan to a LAN
-range for the multi-machine fleet case described in idea.md. Lemonade has no
+range for the multi-machine fleet case described in IDEA.md. Lemonade has no
 announce/broadcast mechanism, so this is a bounded port scan, not magic
 discovery -- capped at 1024 hosts per scan.
 

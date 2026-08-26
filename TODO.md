@@ -188,9 +188,9 @@ Screen recording + voiceover is enough; this doesn't need production value.
 
 ## 4. Ranking-integrity gaps closed in one pass
 
-Went through idea.md's own "missing or not yet trustworthy" list item by item. Two turned out to be permanent, structural limitations of Lemonade's own API (not something to build), and the rest were genuinely implementable:
+Went through IDEA.md's own "missing or not yet trustworthy" list item by item. Two turned out to be permanent, structural limitations of Lemonade's own API (not something to build), and the rest were genuinely implementable:
 
-- **Thermal validity and `power_state` -- confirmed permanently unverifiable, not pending.** Checked Lemonade's own metrics source directly: no temperature sensor and no AC/battery status are exposed anywhere in the server. Documented as a structural disclosure in idea.md rather than left as an ambiguous TODO.
+- **Thermal validity and `power_state` -- confirmed permanently unverifiable, not pending.** Checked Lemonade's own metrics source directly: no temperature sensor and no AC/battery status are exposed anywhere in the server. Documented as a structural disclosure in IDEA.md rather than left as an ambiguous TODO.
 - **Model class and active parameter count -- same permanent limitation.** Confirmed against `model_info_to_json` in Lemonade's own source: no dedicated field for either exists to verify against.
 - **Quantization -- done, partially.** `capabilities.parse_quantization()` (extracted from the dashboard's existing pre-fill heuristic, now shared) parses Lemonade's own checkpoint string for the loaded model; `run_sweep()` flags a run whose claimed `model.quantization` contradicts it. Best-effort (not every checkpoint string encodes a variant), but a real improvement over a pure user assertion. Confirmed live against a real instance with a deliberately wrong quant string.
 - **Confidence intervals -- done.** `ci95_half_width` on decode/prefill/TTFT, using the actual Student's t critical value for the trial count (a small lookup table for df 1-30, falling back to the 1.96 normal approximation beyond that) rather than a fixed z-value that understates the interval for small samples.
@@ -199,7 +199,7 @@ Went through idea.md's own "missing or not yet trustworthy" list item by item. T
 - **Leaderboard default valid-only filter -- done.** The dashboard's `/` leaderboard now hides invalid runs unless a user explicitly clears the filter; a hidden form marker distinguishes "never filtered" from "explicitly cleared" so sort-link clicks (which carry forward whatever's already in the query string) don't silently reset it.
 - **A second, unrelated packaging bug found and fixed while verifying the above.** Built an actual wheel to check the "not confirmed included in a built wheel" TODO item, and found `schema/*.json` at the repo root were independently-maintained files while `pyproject.toml`'s package-data only ever pulled from `src/lemonmatrix/schema/` -- only `result.schema.json` had ever been copied there by hand, so the five newer schemas were silently missing from every built wheel (confirmed: `validate_classify_result()` etc. raised `FileNotFoundError` from a real installed-package test). Fixed by making the repo-root copies symlinks into the package, eliminating the possibility of drift by construction, with a regression test.
 
-Still open from idea.md's list: durable job cancellation/retry/cross-profile scheduling (see the job-engine note above), and everything under "hosted, multi-user" (public leaderboard is TODO item 1, still not started).
+Still open from IDEA.md's list: durable job cancellation/retry/cross-profile scheduling (see the job-engine note above), and everything under "hosted, multi-user" (public leaderboard is TODO item 1, still not started).
 
 ## 5. Embeddings and reranking -- done, CLI-first
 

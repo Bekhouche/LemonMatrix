@@ -212,7 +212,7 @@ def _resource_samples(client: LemonadeClient) -> dict:
     """Best-effort vram_gb/host_memory_gb/watts from the *profiled instance's
     own* /api/v1/system-stats -- never local hardware tools.
 
-    A profile can point at any machine (idea.md: local, LAN, or cloud), not
+    A profile can point at any machine (IDEA.md: local, LAN, or cloud), not
     necessarily the one this process runs on, so the only legitimate source
     for facts about it is Lemonade's own API against that profile's client.
     Confirmed live that vram_gb can be null even mid-inference (seen with
@@ -922,7 +922,7 @@ def _device_verdict(
 ) -> tuple[bool, str | None]:
     """Cross-checks the caller's compute_engine claim against Lemonade's own
     /api/v1/health-reported device for the model this run actually loaded.
-    Router runs have no single physical device to verify (idea.md: the
+    Router runs have no single physical device to verify (IDEA.md: the
     downstream model's engine varies per routed request and is captured in
     the trial sidecar instead), so they always pass. A device never observed
     this run (own_device_seen is None) is treated as unverified, not a
