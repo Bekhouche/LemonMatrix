@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lemonmatrix.github.io/schema/embeddings_result.schema.json",
+  "title": "LemonMatrix Embeddings Benchmark Result",
+  "description": "A single embeddings benchmark run for one model (llamacpp GGUF or FastFlowLM NPU, POST /v1/embeddings). Deliberately separate from result.schema.json: embeddings throughput is not comparable to LLM token throughput, so embeddings runs are never mixed into the main model/router leaderboard.",
+  "type": "object",
+  "required": ["schema_version", "run_type", "run_id", "timestamp", "model", "config", "environment", "metrics", "validity"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "run_type": {
+      "type": "string",
+      "const": "embeddings"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this run (UUID recommended)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the run started."
+    },
+    "model": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Model id as registered in Lemonade." },
+        "checkpoint": { "type": "string", "description": "Underlying HF checkpoint, if known, e.g. owner/repo." }
+      }
+    },
+    "config": {
+      "type": "object",
+      "description": "The matrix axes for this run.",
+      "required": ["compute_engine", "backend", "os", "power_state"],
+      "additionalProperties": false,
+      "properties": {
+        "compute_engine": { "type": "string", "enum": ["cpu", "igpu", "dgpu", "npu"] },
+        "backend": { "type": "string", "description": "e.g. llamacpp-vulkan, flm-npu." },
+        "os": { "type": "string", "enum": ["windows", "linux", "macos", "docker"] },
+        "power_state": { "type": "string", "enum": ["plugged", "battery", "power_capped"] },
+        "power_cap_w": { "type": "number", "description": "Applied power cap in watts, if power_state is power_capped." }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "description": "Fingerprint of the machine and software stack. Auto-discovered from the profile. Required for any run to be comparable.",
+      "required": ["device_model", "cpu", "memory_gb", "os_version", "driver_version"],
+      "additionalProperties": false,
+      "properties": {
+        "device_model": { "type": "string" },
+        "cpu": { "type": "string" },
+        "igpu": { "type": "string" },
+        "igpu_family": { "type": "string", "description": "AMD GPU ROCm architecture codename, e.g. gfx1151." },
+        "dgpu": { "type": "string" },
+        "dgpu_family": { "type": "string", "description": "AMD GPU ROCm architecture codename, e.g. gfx950 -- confirmed more reliable than name for at least one real datacenter card whose name field was a bare numeric string." },
+        "npu": { "type": "string" },
+        "memory_gb": { "type": "number" },
+        "memory_type": { "type": "string" },
+        "os_version": { "type": "string" },
+        "driver_version": { "type": "string" },
+        "rocm_version": { "type": "string" },
+        "backend_version": { "type": "string", "description": "Version of the underlying engine build, if Lemonade reports it as installed." },
+        "lemonade_version": { "type": "string" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Batched embedding latency and throughput. Lemonade's /v1/embeddings response carries no timing field, so latency is measured client-side as wall-clock time around the request -- this times the network round trip to whatever machine the profile actually points at, not local hardware.",
+      "required": ["latency_ms", "embeddings_per_sec", "trial_count", "batch_size"],
+      "additionalProperties": false,
+      "properties": {
+        "latency_ms": { "type": "number", "description": "Mean wall-clock time to embed one batch of batch_size inputs." },
+        "latency_ms_stddev": { "type": "number" },
+        "latency_ms_p95": { "type": "number" },
+        "embeddings_per_sec": { "type": "number", "description": "batch_size / (latency_ms / 1000)." },
+        "trial_count": { "type": "integer", "description": "Number of measured (non-warmup) trials included in aggregated metrics." },
+        "batch_size": { "type": "integer", "description": "Number of input strings embedded per request -- materially affects latency, so required for reproducibility." },
+        "input_chars_total": { "type": "integer", "description": "Total character length across all inputs in the batch." },
+        "embedding_dim": { "type": "integer", "description": "Length of the returned embedding vectors, read from the response." },
+        "peak_memory_gb": { "type": "number" }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "description": "Confounder controls. A run that fails a gate must set valid=false and record why.",
+      "required": ["valid", "warmup_discarded", "exclusive_run"],
+      "additionalProperties": false,
+      "properties": {
+        "valid": { "type": "boolean", "description": "False if any hard gate failed. Invalid runs are shown but never ranked." },
+        "warmup_discarded": { "type": "boolean", "description": "True if warmup iterations were excluded from timing." },
+        "exclusive_run": { "type": "boolean", "description": "True if no competing model workload ran during measurement, per server-verified /api/v1/health polling where possible." },
+        "model_reload_free": { "type": "boolean", "description": "True if the model stayed resident for the whole run (no reload tax)." },
+        "notes": { "type": "string", "description": "Any flags, caveats, or reasons a gate failed." }
+      }
+    }
+  }
+}

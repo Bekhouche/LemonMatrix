@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Sweep · {{ profile_name }}{% endblock %}
+{% block content %}
+{% if batch.status == "running" %}<meta http-equiv="refresh" content="2">{% endif %}
+
+<div class="stat-row">
+  <div class="stat-tile"><div class="value">{{ batch.completed_count }}/{{ batch.total_count }}</div><div class="label">Done</div></div>
+  <div class="stat-tile"><div class="value">{{ batch.failed_count }}</div><div class="label">Failed</div></div>
+  <div class="stat-tile"><div class="value">{{ batch.status }}</div><div class="label">Status</div></div>
+</div>
+
+<div class="card">
+  <h2>Sweep {{ batch.id }} against {{ profile_name }}</h2>
+  <div class="progress-track" style="max-width: 100%; height: 16px; margin-bottom: 1rem;">
+    <div class="progress-fill {{ 'complete' if batch.status == 'done' and batch.failed_count == 0 else '' }}" style="width: {{ (100 * batch.completed_count / batch.total_count) if batch.total_count else 0 }}%;"></div>
+  </div>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Model</th><th>Quant</th><th>Engine</th><th>Backend</th><th>Power</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for item in batch.items %}
+          <tr>
+            <td class="muted">{{ item.model_name }}</td>
+            <td>{{ item.quantization or "–" }}</td>
+            <td><span class="chip {{ item.compute_engine }}">{{ item.compute_engine }}</span></td>
+            <td><code>{{ item.backend }}</code></td>
+            <td>{{ item.power_state }}</td>
+            <td>
+              {% if item.status == "completed" %}
+                <span class="status valid">completed</span>
+              {% elif item.status == "failed" %}
+                <span class="status invalid">failed</span>
+              {% else %}
+                {{ item.status }}
+              {% endif %}
+            </td>
+            <td>
+              {% if item.run_id %}
+                <a href="{{ url_for('result_detail', profile=profile_name, run_id=item.run_id) }}">view →</a>
+              {% elif item.error %}
+                <span class="status invalid" title="{{ item.error }}">{{ item.error[:60] }}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if batch.status == "done" %}
+    <p>
+      <a class="btn" href="{{ url_for('profile_sweep', name=profile_name) }}">Start another sweep</a>
+      {% if batch.failed_count %}
+        <a class="btn secondary" href="{{ url_for('profile_failures', name=profile_name) }}">View full failure log →</a>
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="muted">This page refreshes automatically every 2 seconds.</p>
+  {% endif %}
+</div>
+{% endblock %}

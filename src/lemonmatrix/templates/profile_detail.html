@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{{ profile.name }} · LemonMatrix{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ profile.name }}</h2>
+  <p class="muted">{{ profile.base_url }}</p>
+  <div class="form-grid">
+    {% for key, value in profile.environment.items() %}
+      <div><label>{{ key }}</label>{{ value }}</div>
+    {% endfor %}
+  </div>
+  <a class="btn" href="{{ url_for('profile_run', name=profile.name) }}">Run a new sweep</a>
+  <a class="btn secondary" href="{{ url_for('profile_sweep', name=profile.name) }}">Sweep multiple combinations →</a>
+  <a class="btn secondary" href="{{ url_for('profile_queue', name=profile.name) }}">Run queue →</a>
+  <a class="btn secondary" href="{{ url_for('profile_classify', name=profile.name) }}">Classify →</a>
+  <a class="btn secondary" href="{{ url_for('profile_tts', name=profile.name) }}">Text-to-speech →</a>
+  <a class="btn secondary" href="{{ url_for('profile_stt', name=profile.name) }}">Speech-to-text →</a>
+  <a class="btn secondary" href="{{ url_for('profile_imagegen', name=profile.name) }}">Image generation →</a>
+  <a class="btn secondary" href="{{ url_for('profile_audiogen', name=profile.name) }}">Audio generation →</a>
+  <a class="btn secondary" href="{{ url_for('profile_embeddings', name=profile.name) }}">Embeddings →</a>
+  <a class="btn secondary" href="{{ url_for('profile_rerank', name=profile.name) }}">Rerank →</a>
+  <a class="btn secondary" href="{{ url_for('profile_meshgen', name=profile.name) }}">3D generation →</a>
+  {% if failure_count %}
+    <a class="btn secondary" href="{{ url_for('profile_failures', name=profile.name) }}">Failures ({{ failure_count }}) →</a>
+  {% endif %}
+  <a class="btn secondary" href="{{ url_for('profile_debug', name=profile.name) }}">Debug →</a>
+  <div style="margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+    <form method="post" action="{{ url_for('profile_refresh', name=profile.name) }}" style="margin:0">
+      <button class="btn secondary" type="submit" title="Re-run discovery against this instance and update the saved environment fingerprint">↺ Refresh fingerprint</button>
+    </form>
+    <form method="post" action="{{ url_for('profile_delete', name=profile.name) }}" style="margin:0"
+          onsubmit="return confirm('Delete profile {{ profile.name }}? This does not remove any result files.')">
+      <button class="btn secondary" type="submit" style="color:#c00" title="Remove this profile file">✕ Delete profile</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Available to run</h2>
+  {% if capabilities.error %}
+    <p class="empty">Couldn't reach this instance right now ({{ capabilities.error }}) -- showing the last-known environment above only.</p>
+  {% else %}
+    <div class="form-grid" style="margin-bottom: 1rem;">
+      <div>
+        <label>Compute engines</label>
+        {% for e in capabilities.engines %}<span class="chip {{ e }}">{{ e }}</span> {% else %}<span class="muted">none detected</span>{% endfor %}
+      </div>
+      <div>
+        <label>Models pulled</label>
+        {% if capabilities.models %}
+          {{ capabilities.models | map(attribute='id') | join(', ') }}
+        {% else %}
+          <span class="muted">none yet</span>
+        {% endif %}
+        &nbsp;<a href="{{ url_for('profile_models_add', name=profile.name) }}">Add a model →</a>
+        &nbsp;·&nbsp;<a href="{{ url_for('profile_downloads', name=profile.name) }}">Downloads →</a>
+      </div>
+    </div>
+    {% if not capabilities.backends %}
+      <p class="empty">No text-generation backends available on this instance yet.</p>
+    {% else %}
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Backend</th><th>Engine family</th><th>State</th><th>Version</th><th></th></tr></thead>
+        <tbody>
+          {% for b in capabilities.backends %}
+            <tr>
+              <td><code>{{ b.backend }}</code></td>
+              <td>{{ b.recipe_display }}</td>
+              <td>{{ b.state }}</td>
+              <td class="muted">{{ b.version or "–" }}</td>
+              <td>
+                {% if b.state == "installable" %}
+                  <form method="post" action="{{ url_for('profile_install_backend', name=profile.name) }}" onsubmit="return confirm('Download and install {{ b.backend }}? This can take a while and the page will wait for it to finish.');">
+                    <input type="hidden" name="recipe" value="{{ b.recipe }}">
+                    <input type="hidden" name="backend_key" value="{{ b.backend_key }}">
+                    <button class="btn secondary" type="submit">Install</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Results for this profile</h2>
+  {% if not results %}
+    <p class="empty">No results yet.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr>{% for _, label, _ in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in results %}
+          <tr>
+            {% for key, _, kind in columns %}
+              {% set value = get(r, key) %}
+              {% if key == "model.name" %}
+                <td><a href="{{ url_for('result_detail', profile=r._profile, run_id=r._run_id) }}">{{ value or "–" }}</a></td>
+              {% elif kind == "chip" %}
+                <td>{% if value %}<span class="chip {{ value }}">{{ value }}</span>{% else %}–{% endif %}</td>
+              {% elif kind == "status" %}
+                <td><span class="status {{ "valid" if value else "invalid" }}">{{ "valid" if value else "invalid" }}</span></td>
+              {% elif kind == "num1" %}
+                <td class="num">{{ "%.1f"|format(value) if value is not none else "–" }}</td>
+              {% elif kind == "num0" %}
+                <td class="num">{{ "%.0f"|format(value) if value is not none else "–" }}</td>
+              {% elif kind == "num3" %}
+                <td class="num">{{ "%.3f"|format(value) if value is not none else "–" }}</td>
+              {% else %}
+                <td>{{ value if value is not none else "–" }}</td>
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

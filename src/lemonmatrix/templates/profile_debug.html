@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Debug · {{ profile.name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Raw endpoint dump · {{ profile.name }}</h2>
+  <p class="muted">
+    The raw <code>/api/v1/system-info</code> and <code>/api/v1/health</code> responses for this profile --
+    dashboard equivalent of <code>lemonmatrix profile debug</code>. Use this when a profile's discovered
+    environment fields look wrong: this is what <code>discover_environment</code>'s field-name guesses are
+    mapped from.
+  </p>
+  {% if error %}
+    <p class="empty">Couldn't reach this instance ({{ error }}).</p>
+  {% endif %}
+  <a href="{{ url_for('profile_detail', name=profile.name) }}">← back to {{ profile.name }}</a>
+</div>
+
+<div class="card">
+  <h2>/api/v1/system-info</h2>
+  <pre class="json">{{ system_info_json }}</pre>
+</div>
+
+<div class="card">
+  <h2>/api/v1/health</h2>
+  <pre class="json">{{ health_json }}</pre>
+</div>
+{% endblock %}

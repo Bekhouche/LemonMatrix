@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.DS_Store
+
+# Claude Code's own local session/tool state -- never project content.
+.claude/
+
+# Results and the public leaderboard now live in a separate repo
+# (LemonMatrix/lemonmatrix.github.io) -- this repo is code (CLI, library,
+# tests, schema) only. Excludes the whole tree, not just the sweep-store db,
+# so a stray local `lemonmatrix run` never accidentally gets committed here.
+results/
+
+# Internal competitive-research notes quoting other Discord users' messages
+# verbatim -- not meant for the public repo.
+discord.md
+discord-projects.md

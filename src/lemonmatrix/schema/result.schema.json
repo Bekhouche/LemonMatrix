@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lemonmatrix.github.io/schema/result.schema.json",
+  "title": "LemonMatrix Benchmark Result",
+  "description": "A single benchmark run for one model on one configuration. Prefill and decode are always reported separately.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "timestamp", "model", "config", "environment", "metrics", "validity"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "run_type": {
+      "type": "string",
+      "enum": ["model", "router"],
+      "description": "Whether this run benchmarks a direct model or a Lemonade collection.router. Defaults to 'model' when absent."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this run (UUID recommended)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the run started."
+    },
+        "model": {
+          "type": "object",
+          "required": ["name", "class", "quantization", "context_length"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "description": "Model or router name as registered in Lemonade (e.g. Llama-3.1-8B-Instruct, my-router)." },
+            "class": { "type": "string", "enum": ["dense", "moe", "router"], "description": "Use 'router' for collection.router runs." },
+        "parameters_b": { "type": "number", "description": "Total parameter count in billions." },
+        "active_parameters_b": { "type": "number", "description": "Active parameters per token for MoE models, in billions." },
+        "quantization": { "type": "string", "description": "Exact quant string, e.g. Q4_K_M, INT4, AWQ. Never normalize or approximate." },
+        "context_length": { "type": "integer", "description": "Context window used for the run." }
+      }
+    },
+    "config": {
+      "type": "object",
+      "description": "The matrix axes for this run. Filled by the sweep.",
+      "required": ["compute_engine", "backend", "os", "power_state"],
+      "additionalProperties": false,
+      "properties": {
+        "compute_engine": {
+          "type": "string",
+          "enum": ["cpu", "igpu", "dgpu", "npu", "hybrid", "router"],
+          "description": "Use 'router' when run_type is 'router'; the downstream model's engine is captured in the trial sidecar."
+        },
+        "backend": {
+          "type": "string",
+          "description": "e.g. llama.cpp-vulkan, llama.cpp-rocm, fastflowlm-npu. Use 'collection.router' when run_type is 'router'."
+        },
+        "os": { "type": "string", "enum": ["windows", "linux", "macos", "docker"] },
+        "power_state": { "type": "string", "enum": ["plugged", "battery", "power_capped"] },
+        "power_cap_w": { "type": "number", "description": "Applied power cap in watts, if power_state is power_capped." },
+        "router_default_model": {
+          "type": "string",
+          "description": "Router runs only. The policy's default_model — the fallback when no rule matches. Comes from route_trace."
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "description": "Fingerprint of the machine and software stack. Auto-discovered from the profile. Required for any run to be comparable.",
+      "required": ["device_model", "cpu", "memory_gb", "os_version", "driver_version"],
+      "additionalProperties": false,
+      "properties": {
+        "device_model": { "type": "string", "description": "e.g. HP Ryzen AI Max+ 395 (Strix Halo)" },
+        "cpu": { "type": "string", "description": "e.g. AMD Ryzen AI 9 HX 370" },
+        "igpu": { "type": "string" },
+        "igpu_family": { "type": "string", "description": "AMD GPU ROCm architecture codename, e.g. gfx1151." },
+        "dgpu": { "type": "string" },
+        "dgpu_family": { "type": "string", "description": "AMD GPU ROCm architecture codename, e.g. gfx950 -- confirmed more reliable than name for at least one real datacenter card whose name field was a bare numeric string." },
+        "npu": { "type": "string", "description": "e.g. XDNA 2" },
+        "memory_gb": { "type": "number" },
+        "memory_type": { "type": "string", "description": "e.g. LPDDR5X-7500" },
+        "os_version": { "type": "string" },
+        "driver_version": { "type": "string" },
+        "rocm_version": { "type": "string" },
+        "backend_version": { "type": "string", "description": "Version of the underlying engine, e.g. llama.cpp build hash." },
+        "lemonade_version": { "type": "string" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Prefill and decode are reported separately because their hardware profiles differ.",
+      "required": ["prefill", "decode", "ttft_ms", "peak_memory_gb"],
+      "additionalProperties": false,
+      "properties": {
+        "prefill": {
+          "type": "object",
+          "required": ["tokens_per_sec"],
+          "additionalProperties": false,
+          "properties": {
+            "tokens_per_sec": { "type": "number" },
+            "stddev": { "type": "number", "description": "Standard deviation of prefill tok/s across measured trials." },
+            "p95": { "type": "number", "description": "95th-percentile prefill tok/s across measured trials." },
+            "ci95_half_width": { "type": "number", "description": "Half-width of the 95% confidence interval on mean prefill tok/s (Student's t, actual trial count)." },
+            "joules_per_token": { "type": "number" }
+          }
+        },
+        "decode": {
+          "type": "object",
+          "required": ["tokens_per_sec"],
+          "additionalProperties": false,
+          "properties": {
+            "tokens_per_sec": { "type": "number" },
+            "stddev": { "type": "number", "description": "Standard deviation of decode tok/s across measured trials." },
+            "p95": { "type": "number", "description": "95th-percentile decode tok/s across measured trials." },
+            "ci95_half_width": { "type": "number", "description": "Half-width of the 95% confidence interval on mean decode tok/s (Student's t, actual trial count)." },
+            "inter_token_latency_ms": { "type": "number" },
+            "joules_per_token": { "type": "number" }
+          }
+        },
+        "ttft_ms": { "type": "number", "description": "Time to first token, milliseconds." },
+        "ttft_ms_stddev": { "type": "number", "description": "Standard deviation of TTFT across measured trials, milliseconds." },
+        "ttft_ms_ci95_half_width": { "type": "number", "description": "Half-width of the 95% confidence interval on mean TTFT (Student's t, actual trial count)." },
+        "trial_count": { "type": "integer", "description": "Number of measured (non-warmup) trials included in aggregated metrics." },
+        "peak_memory_gb": { "type": "number" },
+        "prompt_sha256": { "type": "string", "description": "SHA-256 of the exact prompt text used, so two results can be confirmed to have run the identical prompt without embedding the (potentially long) prompt itself." },
+        "cost_per_1k_tokens_usd": {
+          "type": "number",
+          "description": "Derived from the cost model: amortized hardware plus energy at local price -- the sum of energy_cost_per_1k_tokens_usd and hardware_cost_per_1k_tokens_usd, whichever of the two were computable."
+        },
+        "energy_cost_per_1k_tokens_usd": {
+          "type": "number",
+          "description": "The energy-only component of cost_per_1k_tokens_usd. Requires Lemonade to report power draw, which no real instance checked so far does."
+        },
+        "energy_price_usd_per_kwh": {
+          "type": "number",
+          "description": "Local electricity price used for the cost figure, if reported."
+        },
+        "hardware_cost_per_1k_tokens_usd": {
+          "type": "number",
+          "description": "The hardware-amortization component of cost_per_1k_tokens_usd: (hardware_cost_usd / hardware_lifetime_hours) spread over decode tokens/sec."
+        },
+        "hardware_cost_usd": {
+          "type": "number",
+          "description": "Purchase price of the hardware used for the cost figure, if reported."
+        },
+        "hardware_lifetime_hours": {
+          "type": "number",
+          "description": "Expected service life in hours used to amortize hardware_cost_usd, if reported."
+        }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "description": "Confounder controls. A run that fails a gate must set valid=false and record why.",
+      "required": ["valid", "warmup_discarded", "thermal_ok", "exclusive_run"],
+      "additionalProperties": false,
+      "properties": {
+        "valid": { "type": "boolean", "description": "False if any hard gate failed. Invalid runs are shown but never ranked." },
+        "warmup_discarded": { "type": "boolean", "description": "True if warmup iterations were excluded from timing." },
+        "thermal_ok": { "type": "boolean", "description": "False if temperature crossed the throttle threshold during measurement." },
+        "peak_temp_c": { "type": "number" },
+        "exclusive_run": { "type": "boolean", "description": "True if no competing GPU/NPU workload ran during measurement." },
+        "model_reload_free": { "type": "boolean", "description": "True if the model stayed resident for the whole run (no unload tax)." },
+        "notes": { "type": "string", "description": "Any flags, caveats, or reasons a gate failed." }
+      }
+    }
+  }
+}

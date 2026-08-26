@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Rerank · {{ profile.name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Reranking benchmark · {{ profile.name }}</h2>
+  <p class="muted">
+    Benchmarks a reranking request's latency and throughput (Lemonade's llamacpp GGUF recipe only --
+    FastFlowLM doesn't support reranking -- <code>/v1/rerank</code>). Deliberately separate from the
+    model/router leaderboard -- reranking throughput isn't comparable to LLM token throughput. This runs
+    synchronously.
+  </p>
+  {% if capabilities.error %}
+    <p class="empty">Couldn't reach this instance ({{ capabilities.error }}) -- engine and backend fall back to free text.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('profile_rerank', name=profile.name) }}">
+    <div class="form-grid">
+      <div>
+        <label for="model_name">Model</label>
+        {% if rerank_models %}
+          <select id="model_name" name="model_name">
+            {% for m in rerank_models %}
+              <option value="{{ m.id }}">{{ m.id }}{% if m.checkpoint %} ({{ m.checkpoint }}){% endif %}</option>
+            {% endfor %}
+          </select>
+          <div class="muted">Lemonade doesn't flag which pulled models are reranker-labeled -- pick one you know supports it. It errors clearly at run time if not.</div>
+        {% else %}
+          <input type="text" id="model_name" name="model_name" required placeholder="e.g. BGE-Reranker-Base-GGUF">
+          <div class="muted">No llamacpp models pulled yet on this profile -- pull one first, then reload this page.</div>
+        {% endif %}
+      </div>
+
+      <div>
+        <label for="compute_engine">Engine</label>
+        <select id="compute_engine" name="compute_engine">
+          {% for e in (capabilities.engines or ["cpu", "igpu", "dgpu", "npu"]) %}
+            <option value="{{ e }}">{{ e }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="backend">Backend</label>
+        {% if rerank_backends %}
+          <select id="backend" name="backend">
+            {% for b in rerank_backends %}
+              <option value="{{ b.backend }}" {% if b.state != 'installed' %}disabled{% endif %}>
+                {{ b.recipe_display }} · {{ b.backend_key }} ({{ b.state }}){% if b.version %} {{ b.version }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        {% else %}
+          <input type="text" id="backend" name="backend" required placeholder="llamacpp-vulkan">
+          <div class="muted">No backend detected -- install it on the profile page first, or enter it manually.</div>
+        {% endif %}
+      </div>
+
+      <div>
+        <label>OS</label>
+        {% if default_os %}
+          <div style="padding: 0.4rem 0;">{{ default_os }} <span class="muted">(fixed by this profile)</span></div>
+        {% else %}
+          <div class="empty" style="padding: 0.4rem 0;">Couldn't detect -- see profile page to fix discovery.</div>
+        {% endif %}
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label for="query">Query</label>
+        <input type="text" id="query" name="query" required placeholder="capital of France">
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label for="documents">Documents (one per line)</label>
+        <textarea id="documents" name="documents" rows="4" required placeholder="Paris is the capital of France.&#10;Berlin is the capital of Germany.">Paris is the capital of France.
+Berlin is the capital of Germany.</textarea>
+        <div class="muted">Each non-blank line is one document reranked against the query -- document count materially affects latency.</div>
+      </div>
+
+      <div><label for="top_n">Top N (optional)</label><input type="number" id="top_n" name="top_n" min="1"></div>
+      <div>
+        <label for="power_state">Power state</label>
+        <select id="power_state" name="power_state">
+          <option value="plugged">plugged</option>
+          <option value="battery">battery</option>
+          <option value="power_capped">power_capped</option>
+        </select>
+      </div>
+      <div><label for="power_cap_w">Power cap (W, optional)</label><input type="number" id="power_cap_w" name="power_cap_w"></div>
+      <div><label for="warmup_trials">Warmup trials</label><input type="number" id="warmup_trials" name="warmup_trials" value="2"></div>
+      <div><label for="measured_trials">Measured trials</label><input type="number" id="measured_trials" name="measured_trials" value="5"></div>
+      <div><label>&nbsp;</label><label><input type="checkbox" id="exclusive_run" name="exclusive_run" checked> Exclusive run (no competing workload)</label></div>
+    </div>
+    <button class="btn" type="submit">Run rerank benchmark</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Rerank results for {{ profile.name }}</h2>
+  {% if not results %}
+    <p class="empty">No rerank results yet.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Timestamp</th><th>Model</th><th>Latency (ms)</th><th>Throughput (/sec)</th><th>Documents</th><th>Top N</th><th>Valid</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for r in results %}
+          <tr>
+            <td class="muted">{{ r.timestamp }}</td>
+            <td>{{ r.model.name }}</td>
+            <td class="num">{{ "%.1f"|format(r.metrics.latency_ms) }}</td>
+            <td class="num">{{ "%.2f"|format(r.metrics.documents_per_sec) }}</td>
+            <td class="num">{{ r.metrics.document_count }}</td>
+            <td class="num">{{ r.metrics.top_n or "–" }}</td>
+            <td><span class="status {{ "valid" if r.validity.valid else "invalid" }}">{{ "valid" if r.validity.valid else "invalid" }}</span></td>
+            <td class="muted">{{ r.validity.notes or "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Trials · {{ result.model.name }} · {{ result._profile }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Raw trials · {{ result.model.name }} ({{ result.model.quantization }}) on {{ result._profile }}</h2>
+  <p class="muted">
+    Per-trial measurements underlying this run's aggregated metrics -- including, for router runs, each
+    trial's route trace (<code>x_lemonade_route</code>) if requested. Dashboard equivalent of
+    <code>lemonmatrix trials {{ result._profile }} {{ result._run_id }}</code>.
+  </p>
+  <a href="{{ url_for('result_detail', profile=result._profile, run_id=result._run_id) }}">← back to result</a>
+</div>
+
+<div class="card">
+  <h2>Trials</h2>
+  <pre class="json">{{ trials_json }}</pre>
+</div>
+{% endblock %}

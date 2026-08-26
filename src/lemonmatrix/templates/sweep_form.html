@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% block title %}Sweep · {{ profile.name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Sweep multiple combinations against {{ profile.name }}</h2>
+  <p class="muted">
+    Check every quantization/engine/backend/power-state you want. Impossible engine+backend pairs are
+    automatically dropped before the sweep starts — only valid combinations run.
+    Lemonade holds one model at a time, so runs are sequential in the background.
+  </p>
+
+  {% if running_batch %}
+    <p class="empty">
+      A sweep is already running ({{ running_batch.completed_count }}/{{ running_batch.total_count }} done) —
+      <a href="{{ url_for('sweep_status', name=profile.name, batch_id=running_batch.id) }}">view progress</a> before starting another.
+    </p>
+  {% endif %}
+
+  {% if capabilities.error %}
+    <p class="empty">Couldn't reach this instance ({{ capabilities.error }}).</p>
+  {% elif not models_by_base %}
+    <p class="empty">No models pulled yet — <a href="{{ url_for('profile_models_add', name=profile.name) }}">pull one first</a>.</p>
+  {% else %}
+    {% set base_names = models_by_base.keys() | list %}
+    {% set first_variants = models_by_base[base_names[0]] %}
+    <form method="post" action="{{ url_for('profile_sweep', name=profile.name) }}" onsubmit="return lmConfirmSweep();">
+      <div class="card" style="margin: 0 0 1rem;">
+        <h2>Run type</h2>
+        <label style="display:inline-block; margin-right: 1rem; font-weight: normal;">
+          <input type="radio" id="run_type_model" name="run_type" value="model" checked onchange="lmToggleRunType()"> Model
+        </label>
+        <label style="display:inline-block; font-weight: normal;">
+          <input type="radio" id="run_type_router" name="run_type" value="router" onchange="lmToggleRunType()"> Router <span class="muted">(sweep multiple collection.router models -- engine/backend/quant are auto-set)</span>
+        </label>
+      </div>
+
+      <div id="model_fields">
+      <div class="form-grid">
+        <div>
+          <label for="model_base">Model</label>
+          <select id="model_base" name="model_base" onchange="lmOnBaseChange(this)">
+            {% for base in base_names %}<option value="{{ base }}">{{ base }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="model_class">Model class</label>
+          <select id="model_class" name="model_class">
+            <option value="dense">dense</option><option value="moe">moe</option>
+          </select>
+        </div>
+        <div>
+          <label>OS</label>
+          {% if default_os %}
+            <div style="padding: 0.4rem 0;">{{ default_os }} <span class="muted">(fixed by this profile)</span></div>
+          {% else %}
+            <div class="empty" style="padding: 0.4rem 0;">Couldn't detect — see profile page.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      {# ── Quantization ───────────────────────────────────────────── #}
+      <div class="card" style="margin: 1rem 0;">
+        <h2>Quantization</h2>
+        <div id="quant_checkboxes">
+          {% for v in first_variants %}
+            <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+              <input type="checkbox" name="quantizations" value="{{ v.quantization }}" checked onchange="lmUpdateCount()">
+              {{ v.quantization or "(unknown)" }}{% if v.size_gb %} ({{ "%.1f"|format(v.size_gb) }} GB){% endif %}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ── Engine ─────────────────────────────────────────────────── #}
+      <div class="card" style="margin: 1rem 0;">
+        <h2>Engine</h2>
+        {% if capabilities.engines %}
+          <p class="muted" style="margin: 0 0 0.5rem;">Detected on this hardware by Lemonade:</p>
+          {% for e in capabilities.engines %}
+            <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+              <input type="checkbox" name="engines" value="{{ e }}" checked onchange="lmUpdateCount()">
+              {{ e }}
+            </label>
+          {% endfor %}
+          <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+            <input type="checkbox" name="engines" value="hybrid" onchange="lmUpdateCount()">
+            hybrid <span class="muted">(multi-device)</span>
+          </label>
+        {% else %}
+          <p class="muted" style="margin: 0 0 0.5rem;">Instance offline — select manually:</p>
+          {% for e in ["cpu", "igpu", "dgpu", "npu", "hybrid"] %}
+            <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+              <input type="checkbox" name="engines" value="{{ e }}" onchange="lmUpdateCount()">
+              {{ e }}
+            </label>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      {# ── Backend ────────────────────────────────────────────────── #}
+      <div class="card" style="margin: 1rem 0;">
+        <h2>Backend</h2>
+        {% if capabilities.backends_installed %}
+          <p class="muted" style="margin: 0 0 0.5rem;">Installed on this instance (pre-selected):</p>
+          {% for b in capabilities.backends_installed %}
+            <label style="display:block; margin: 0.2rem 0;">
+              <input type="checkbox" name="backends" value="{{ b.backend }}" checked onchange="lmUpdateCount()">
+              {{ b.recipe_display }} · {{ b.backend_key }}{% if b.version %} <span class="muted">({{ b.version }})</span>{% endif %}
+            </label>
+          {% endfor %}
+          {% if capabilities.backends_installable %}
+            <p class="muted" style="margin: 0.8rem 0 0.3rem;">Not installed yet (install first on the profile page to enable):</p>
+            {% for b in capabilities.backends_installable %}
+              <label style="display:block; margin: 0.2rem 0; opacity: 0.5;">
+                <input type="checkbox" name="backends" value="{{ b.backend }}" disabled>
+                {{ b.recipe_display }} · {{ b.backend_key }} <span class="muted">(installable)</span>
+              </label>
+            {% endfor %}
+          {% endif %}
+        {% elif capabilities.backends %}
+          <p class="empty">No backends installed yet — install one via the profile page first.</p>
+        {% else %}
+          <p class="empty">No backends available.</p>
+        {% endif %}
+        <div id="compat_warn" style="display:none; color: var(--status-critical); margin-top: 0.6rem; font-weight: 600;"></div>
+      </div>
+      </div>
+
+      {# ── Router (auto-fills engine/backend/quant/class) ────────────── #}
+      <div id="router_fields" class="card" style="margin: 1rem 0; display:none;">
+        <h2>Routers</h2>
+        {% if routers %}
+          {% for r in routers %}
+            <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+              <input type="checkbox" name="router_models" value="{{ r.id }}" checked onchange="lmUpdateCount()">
+              {{ r.id }}
+            </label>
+          {% endfor %}
+        {% else %}
+          <p class="empty">No routers detected on this profile.</p>
+        {% endif %}
+        <div class="form-grid" style="margin-top: 0.8rem;">
+          <div><label for="router_context_length">Context length</label><input type="number" id="router_context_length" name="router_context_length" value="4096"></div>
+        </div>
+        <div class="muted">Route decisions are captured per trial in each run's trials sidecar; engine/backend/quantization/model class are fixed facts of a router, not choices.</div>
+      </div>
+
+      {# ── Power state ────────────────────────────────────────────── #}
+      <div class="card" style="margin: 1rem 0;">
+        <h2>Power state</h2>
+        {% for p in ["plugged", "battery", "power_capped"] %}
+          <label style="display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;">
+            <input type="checkbox" name="power_states" value="{{ p }}" {{ "checked" if p == "plugged" }} onchange="lmUpdateCount()">
+            {{ p }}
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="form-grid">
+        <div><label for="power_cap_w">Power cap (W, optional)</label><input type="number" id="power_cap_w" name="power_cap_w"></div>
+        <div><label for="warmup_trials">Warmup trials</label><input type="number" id="warmup_trials" name="warmup_trials" value="2"></div>
+        <div><label for="measured_trials">Measured trials</label><input type="number" id="measured_trials" name="measured_trials" value="5"></div>
+        <div><label for="max_tokens">Max tokens</label><input type="number" id="max_tokens" name="max_tokens" value="256"></div>
+        <div><label for="energy_price_usd_per_kwh">Electricity price ($/kWh, optional)</label><input type="number" step="0.01" id="energy_price_usd_per_kwh" name="energy_price_usd_per_kwh"></div>
+        <div><label for="hardware_cost_usd">Hardware cost ($, optional)</label><input type="number" step="0.01" id="hardware_cost_usd" name="hardware_cost_usd"></div>
+        <div><label for="hardware_lifetime_hours">Hardware lifetime (hours, optional)</label><input type="number" step="1" id="hardware_lifetime_hours" name="hardware_lifetime_hours" placeholder="e.g. 26280 for 3 years"></div>
+        <div><label>&nbsp;</label><label><input type="checkbox" id="exclusive_run" name="exclusive_run" checked> Exclusive run (no competing workload)</label></div>
+        <div><label>&nbsp;</label><label><input type="checkbox" id="via_job_engine" name="via_job_engine" title="Execute each combination as a single durable Lemonade job (POST /v1/jobs) instead of direct HTTP calls -- survives this dashboard restarting mid-combination."> Execute via Lemonade's job engine</label></div>
+      </div>
+
+      <p>
+        <strong id="combo_count">0</strong> valid combination(s) will run
+        <span id="skipped_note" style="display:none; color: var(--status-critical);"></span>.
+        Limit: {{ max_combinations }}.
+      </p>
+      <button class="btn" type="submit" id="sweep_submit">Start sweep</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if models_by_base %}
+<script>
+  var LM_MODELS_BY_BASE = {{ models_by_base_json | safe }};
+  var LM_COMPAT = {{ compat_map_json | safe }};
+  var LM_MAX = {{ max_combinations }};
+
+  function lmOnBaseChange(select) {
+    var variants = LM_MODELS_BY_BASE[select.value] || [];
+    var container = document.getElementById("quant_checkboxes");
+    container.innerHTML = "";
+    variants.forEach(function (v) {
+      var label = document.createElement("label");
+      label.style.cssText = "display:inline-block; margin: 0.2rem 0.8rem 0.2rem 0;";
+      var input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "quantizations";
+      input.value = v.quantization;
+      input.checked = true;
+      input.onchange = lmUpdateCount;
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(" " + (v.quantization || "(unknown)") + (v.size_gb ? " (" + v.size_gb.toFixed(1) + " GB)" : "")));
+      container.appendChild(label);
+    });
+    lmUpdateCount();
+  }
+
+  function lmChecked(name) {
+    return Array.from(document.querySelectorAll('input[name="' + name + '"]:checked')).map(function (el) { return el.value; });
+  }
+
+  function lmToggleRunType() {
+    var isRouter = document.getElementById("run_type_router").checked;
+    document.getElementById("model_fields").style.display = isRouter ? "none" : "block";
+    document.getElementById("router_fields").style.display = isRouter ? "block" : "none";
+    var jobEngine = document.getElementById("via_job_engine");
+    if (jobEngine) {
+      jobEngine.disabled = isRouter;
+      if (isRouter) jobEngine.checked = false;
+    }
+    lmUpdateCount();
+  }
+
+  function lmUpdateCount() {
+    var powers = lmChecked("power_states").length;
+    var isRouter = document.getElementById("run_type_router").checked;
+
+    var count, skippedPairs = 0;
+    if (isRouter) {
+      count = lmChecked("router_models").length * powers;
+    } else {
+      var quants = lmChecked("quantizations").length;
+      var engines = lmChecked("engines");
+      var backends = lmChecked("backends");
+
+      // Count only valid engine+backend pairs.
+      var validPairs = 0;
+      engines.forEach(function (eng) {
+        backends.forEach(function (bck) {
+          var allowed = LM_COMPAT[bck];
+          if (!allowed || allowed.length === 0 || allowed.indexOf(eng) !== -1) {
+            validPairs++;
+          } else {
+            skippedPairs++;
+          }
+        });
+      });
+      count = quants * validPairs * powers;
+    }
+
+    var el = document.getElementById("combo_count");
+    el.textContent = count;
+    el.style.color = (count > LM_MAX || count === 0) ? "var(--status-critical)" : "";
+
+    var skipNote = document.getElementById("skipped_note");
+    if (skippedPairs > 0) {
+      skipNote.textContent = "(" + skippedPairs + " impossible engine+backend pair(s) will be dropped)";
+      skipNote.style.display = "inline";
+    } else {
+      skipNote.style.display = "none";
+    }
+
+    var warn = document.getElementById("compat_warn");
+    if (skippedPairs > 0) {
+      warn.textContent = "\u26A0 Some selected engine+backend combinations are not compatible and will be skipped automatically.";
+      warn.style.display = "block";
+    } else {
+      warn.style.display = "none";
+    }
+
+    document.getElementById("sweep_submit").disabled = count === 0 || count > LM_MAX;
+  }
+
+  function lmConfirmSweep() {
+    var count = document.getElementById("combo_count").textContent;
+    return confirm("Run " + count + " combination(s) sequentially in the background?");
+  }
+
+  lmUpdateCount();
+</script>
+{% endif %}
+{% endblock %}
