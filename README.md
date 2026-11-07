@@ -50,6 +50,29 @@ range for the multi-machine fleet case. Lemonade has no
 announce/broadcast mechanism, so this is a bounded port scan, not magic
 discovery -- capped at 1024 hosts per scan.
 
+## Router cost runs
+
+A `collection.router` that mixes local and cloud candidates answers one
+question: how much of the cloud bill does local hardware take over? Give the
+router a mixed prompt set and LemonMatrix records where each request went and
+prices it:
+
+```bash
+lemonmatrix run --profile my-machine --run-type router \
+  --model user.My-Router --context-length 4096 --power-state plugged \
+  --prompt-set router-mix --trials 10
+```
+
+The result's `metrics.routing` block holds the share of requests per
+candidate, the share that stayed local, the cost of the run, and the cost of
+sending every request to the most expensive candidate instead. Prices are USD
+per million tokens. They come from Lemonade's own `estimated_cost` when the
+candidate carries cost metadata (cloud models get it from their provider), and
+non-cloud candidates count as free. `--cost MODEL=IN,OUT` sets or overrides a
+price, `--cost-baseline MODEL` picks the comparison model, and
+`--prompts-file` takes your own prompts (one per line, or JSONL). The baseline
+is priced on the same token counts, so it is an estimate.
+
 ## Dashboard
 
 `lemonmatrix dashboard` starts a local Flask app (default

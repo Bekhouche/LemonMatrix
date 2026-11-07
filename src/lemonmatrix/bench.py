@@ -19,17 +19,19 @@ ignore the second element.
 from __future__ import annotations
 
 import hashlib
+import json
 import statistics
 import struct
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from .backend_version import lookup_backend_version, resolve_backend
 from .capabilities import engine_backend_compatible, parse_quantization
 from .client import LemonadeClient
+from .routing_cost import summarize_routing
 
 STATS_TTFT_IS_SECONDS = True
 
@@ -71,6 +73,12 @@ class SweepConfig:
     # Lemonade handles routing transparently -- the same chat/completions endpoint
     # is used; route_trace=true asks for x_lemonade_route in the response body.
     run_type: str = "model"  # "model" | "router"
+    # Router runs: trial i sends prompts[i % len(prompts)] instead of `prompt`,
+    # so the router sees a mix of requests and its choices can be priced.
+    prompts: list[str] | None = None
+    # USD per million input/output tokens per candidate: {model: {"input", "output"}}.
+    cost_overrides: dict[str, dict] | None = None
+    cost_baseline_model: str | None = None
 
 
 def _ttft_ms(stats: dict) -> float:
@@ -390,11 +398,16 @@ def run_sweep(
     # still has this listing side effect) -- looking it up afterward would
     # silently find nothing and fall back to the buggy pre-fix behavior.
     own_model_names: str | set[str] = cfg.model_name
+    candidate_recipes: dict[str, str] = {}
     if is_router:
         try:
-            router_entry = next((m for m in client.models() if m.get("id") == cfg.model_name), None)
+            models = client.models()
+            router_entry = next((m for m in models if m.get("id") == cfg.model_name), None)
             components = (router_entry or {}).get("components") or []
             own_model_names = {cfg.model_name, *components}
+            candidate_recipes = {
+                m["id"]: m.get("recipe") for m in models if m.get("id") in components and m.get("recipe")
+            }
         except Exception:
             own_model_names = cfg.model_name
 
@@ -402,17 +415,29 @@ def run_sweep(
 
     exclusivity = _ExclusivityMonitor(client, own_model_names)
     with exclusivity:
-        for _ in range(cfg.warmup_trials):
-            _run_one(client, cfg)
+        for i in range(cfg.warmup_trials):
+            _run_one(client, _trial_cfg(cfg, i))
 
         # The model stays resident for every measured trial, so model_reload_free
         # holds for the whole run -- there is no unload here by design.
-        raw_trials = [_run_one(client, cfg) for _ in range(cfg.measured_trials)]
+        raw_trials = []
+        for i in range(cfg.measured_trials):
+            trial = _run_one(client, _trial_cfg(cfg, i))
+            if cfg.prompts:
+                trial["prompt_index"] = i % len(cfg.prompts)
+            raw_trials.append(trial)
 
     return _aggregate_sweep_result(
         client, environment, cfg, raw_trials, exclusivity, system_info,
         engine_ok, engine_reason, backend_unresolved_note, is_router,
+        candidate_recipes=candidate_recipes,
     )
+
+
+def _trial_cfg(cfg: SweepConfig, index: int) -> SweepConfig:
+    if not cfg.prompts:
+        return cfg
+    return replace(cfg, prompt=cfg.prompts[index % len(cfg.prompts)])
 
 
 def _aggregate_sweep_result(
@@ -426,6 +451,7 @@ def _aggregate_sweep_result(
     engine_reason: str,
     backend_unresolved_note: str | None,
     is_router: bool,
+    candidate_recipes: dict[str, str] | None = None,
 ) -> tuple[dict, list[dict]]:
     """Turns raw_trials (in _run_one()'s dict shape: ttft_ms,
     decode_tokens_per_sec, prompt_tokens, output_tokens, watts, vram_gb,
@@ -510,8 +536,20 @@ def _aggregate_sweep_result(
         # Reproducibility: lets two results be confirmed to have run the
         # identical prompt without embedding the (potentially long) prompt
         # text itself in every result file.
-        "prompt_sha256": hashlib.sha256(cfg.prompt.encode()).hexdigest(),
+        "prompt_sha256": hashlib.sha256(
+            (json.dumps(cfg.prompts) if cfg.prompts else cfg.prompt).encode()
+        ).hexdigest(),
     }
+    if is_router:
+        routing = summarize_routing(
+            raw_trials,
+            candidate_recipes or {},
+            overrides=cfg.cost_overrides,
+            baseline_model=cfg.cost_baseline_model,
+            prompt_set_size=len(cfg.prompts) if cfg.prompts else None,
+        )
+        if routing:
+            metrics["routing"] = routing
     ttft_sd = _stddev(ttft_vals)
     ttft_ci95 = _ci95_half_width(ttft_vals)
     if ttft_sd is not None:

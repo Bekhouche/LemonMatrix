@@ -20,15 +20,77 @@ from .capabilities import (available_backends, available_compute_engines, availa
 from .client import BENCH_TIMEOUT, LemonadeClient, job_progress_percent
 from .discover import QUICK_SELECT_PORTS, expand_subnet, scan, scan_localhost
 from .profile import DEFAULT_PORT, DEFAULT_PROFILE_DIR, Profile, build_url, connect_and_save
+from .prompt_sets import PROMPT_SETS, load_prompt_file
 from .results_store import (list_audiogen_results, list_classify_results, list_embeddings_results,
                              list_imagegen_results, list_meshgen_results, list_rerank_results,
                              list_results, list_stt_results, list_tts_results, load_trials,
                              results_to_csv, save_audiogen_result, save_classify_result,
                              save_embeddings_result, save_imagegen_result, save_meshgen_result,
                              save_rerank_result, save_stt_result, save_trials, save_tts_result)
+from .routing_cost import parse_cost_override
 from .validate import (validate_audiogen_result, validate_classify_result, validate_embeddings_result,
                         validate_imagegen_result, validate_meshgen_result, validate_rerank_result,
                         validate_result, validate_stt_result, validate_tts_result)
+
+
+def _router_cost_options(func):
+    """--prompt-set/--prompts-file/--cost/--cost-baseline, shared by run and sweep."""
+    options = [
+        click.option("--prompt-set", type=click.Choice(sorted(PROMPT_SETS)), default=None,
+                     help="Router runs: a built-in mixed prompt set; trial i sends prompt i (cycling)."),
+        click.option("--prompts-file", type=click.Path(exists=True, dir_okay=False), default=None,
+                     help="Router runs: your own prompt set, one prompt per line or JSONL."),
+        click.option("--cost", "costs", multiple=True, metavar="MODEL=IN,OUT",
+                     help="Router runs: USD per million input,output tokens for a candidate. Overrides "
+                          "Lemonade's estimated_cost; non-cloud candidates default to free. Repeatable."),
+        click.option("--cost-baseline", default=None,
+                     help="Router runs: the model every request is priced against for savings "
+                          "(default: the most expensive priced candidate)."),
+    ]
+    for option in reversed(options):
+        func = option(func)
+    return func
+
+
+def _router_cost_settings(
+    run_type: str, prompt_set: str | None, prompts_file: str | None, costs: tuple[str, ...], cost_baseline: str | None
+) -> tuple[list[str] | None, dict[str, dict], str | None]:
+    if run_type != "router" and (prompt_set or prompts_file or costs or cost_baseline):
+        raise click.UsageError("--prompt-set, --prompts-file, --cost and --cost-baseline need --run-type router.")
+    if prompt_set and prompts_file:
+        raise click.UsageError("Use --prompt-set or --prompts-file, not both.")
+    prompts = None
+    if prompt_set:
+        prompts = list(PROMPT_SETS[prompt_set])
+    elif prompts_file:
+        try:
+            prompts = load_prompt_file(prompts_file)
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise click.UsageError(f"--prompts-file: {exc}") from exc
+    overrides: dict[str, dict] = {}
+    for text in costs:
+        try:
+            model, price = parse_cost_override(text)
+        except ValueError as exc:
+            raise click.UsageError(f"--cost: {exc}") from exc
+        overrides[model] = price
+    return prompts, overrides, cost_baseline
+
+
+def _echo_routing(result: dict) -> None:
+    routing = result["metrics"].get("routing")
+    if not routing:
+        return
+    split = ", ".join(f"{name} {c['share']:.0%}" for name, c in routing["candidates"].items())
+    click.echo(f"  routing: {split}   local {routing['local_share']:.0%}   free {routing['free_share']:.0%}")
+    line = f"  cost: ${routing['routed_cost_usd']:.6f}"
+    if "baseline_cost_usd" in routing:
+        line += f" vs ${routing['baseline_cost_usd']:.6f} all-{routing['baseline_model']}"
+        if "savings_pct" in routing:
+            line += f" (saved {routing['savings_pct']:.1f}%)"
+    if routing["unpriced_requests"]:
+        line += f"   {routing['unpriced_requests']} unpriced request(s), no savings computed"
+    click.echo(line)
 
 
 def _save_profile(name: str, base_url: str, api_key: str | None, driver_version, igpu, dgpu) -> Profile:
@@ -374,6 +436,7 @@ def profile_downloads_control(name: str, download_id: str, action: str) -> None:
 @click.option("--out", "out_dir", type=click.Path(file_okay=False), default="results", show_default=True)
 @click.option("--force", is_flag=True, default=False,
               help="Bypass engine/backend compatibility checks and run anyway (result will be marked invalid).")
+@_router_cost_options
 def run(
     profile_name: str,
     model_name: str,
@@ -398,6 +461,10 @@ def run(
     via_job_engine: bool,
     out_dir: str,
     force: bool,
+    prompt_set: str | None,
+    prompts_file: str | None,
+    costs: tuple[str, ...],
+    cost_baseline: str | None,
 ) -> None:
     """Run one benchmark against a saved profile and write a result JSON.
 
@@ -417,7 +484,16 @@ def run(
     auto-set (router / none / router / collection.router).  Route decisions
     are captured per trial in the sidecar; timing is recorded just like a
     model run.
+
+    \b
+    Router cost run (where requests went, and what that cost vs all-cloud):
+      lemonmatrix run --profile strix --run-type router \\
+        --model my-local-cloud-router --context-length 4096 --power-state plugged \\
+        --prompt-set router-mix --trials 10 --cost fireworks.kimi-k2p5=0.6,2.5
     """
+    prompts, cost_overrides, cost_baseline = _router_cost_settings(
+        run_type, prompt_set, prompts_file, costs, cost_baseline
+    )
     try:
         prof = Profile.load(profile_name)
     except FileNotFoundError:
@@ -494,6 +570,9 @@ def run(
         hardware_cost_usd=hardware_cost_usd,
         hardware_lifetime_hours=hardware_lifetime_hours,
         run_type=run_type,
+        prompts=prompts,
+        cost_overrides=cost_overrides,
+        cost_baseline_model=cost_baseline,
     )
     if prompt_file:
         cfg.prompt = Path(prompt_file).read_text()
@@ -529,6 +608,7 @@ def run(
     stddev = result["metrics"]["decode"].get("stddev")
     if stddev is not None:
         click.echo(f"  decode stddev: {stddev:.2f} tok/s   p95: {result['metrics']['decode'].get('p95', 0):.1f} tok/s")
+    _echo_routing(result)
     if not result["validity"]["valid"]:
         click.secho(f"Marked invalid: {result['validity'].get('notes', 'see validity block')}", fg="yellow")
 
@@ -1571,6 +1651,7 @@ def meshgen_results(results_dir: str, profile_name: str | None) -> None:
 @click.option("--out", "out_dir", type=click.Path(file_okay=False), default="results", show_default=True)
 @click.option("--skip-incompatible/--no-skip-incompatible", default=True, show_default=True,
               help="Skip impossible engine/backend combos (default). Use --no-skip-incompatible to run them anyway (will be marked invalid).")
+@_router_cost_options
 def sweep(
     profile_name: str,
     run_type: str,
@@ -1592,6 +1673,10 @@ def sweep(
     via_job_engine: bool,
     out_dir: str,
     skip_incompatible: bool,
+    prompt_set: str | None,
+    prompts_file: str | None,
+    costs: tuple[str, ...],
+    cost_baseline: str | None,
 ) -> None:
     """Run a Cartesian matrix sweep against a saved profile.
 
@@ -1610,6 +1695,9 @@ def sweep(
     For router runs, engine/backend/class are auto-set; engine+backend
     validation is bypassed since the router controls backend selection.
     """
+    prompts, cost_overrides, cost_baseline = _router_cost_settings(
+        run_type, prompt_set, prompts_file, costs, cost_baseline
+    )
     try:
         prof = Profile.load(profile_name)
     except FileNotFoundError:
@@ -1746,6 +1834,9 @@ def sweep(
             hardware_cost_usd=hardware_cost_usd,
             hardware_lifetime_hours=hardware_lifetime_hours,
             run_type=run_type,
+            prompts=prompts,
+            cost_overrides=cost_overrides,
+            cost_baseline_model=cost_baseline,
         )
         try:
             if via_job_engine:
@@ -1757,6 +1848,7 @@ def sweep(
             save_trials(out_dir, profile_name, result["run_id"], raw_trials)
             tps = result["metrics"]["decode"]["tokens_per_sec"]
             click.secho(f"  OK {tps:.1f} tok/s", fg="green")
+            _echo_routing(result)
             if not result["validity"]["valid"]:
                 click.secho(f"  (invalid: {result['validity'].get('notes', '')})", fg="yellow")
             completed += 1

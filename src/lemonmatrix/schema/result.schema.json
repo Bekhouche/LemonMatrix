@@ -144,6 +144,40 @@
         "hardware_lifetime_hours": {
           "type": "number",
           "description": "Expected service life in hours used to amortize hardware_cost_usd, if reported."
+        },
+        "routing": {
+          "type": "object",
+          "description": "Router runs only: where the router sent each measured request and what that cost, against sending every request to baseline_model. Prices are USD per million tokens, from a caller override, Lemonade's estimated_cost, or free for non-cloud candidates.",
+          "required": ["requests", "candidates", "local_share", "free_share", "routed_cost_usd", "unpriced_requests"],
+          "additionalProperties": false,
+          "properties": {
+            "requests": { "type": "integer", "minimum": 1 },
+            "prompt_set_size": { "type": "integer", "minimum": 1 },
+            "candidates": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["requests", "share", "prompt_tokens", "output_tokens", "cost_usd", "price_source"],
+                "additionalProperties": false,
+                "properties": {
+                  "requests": { "type": "integer", "minimum": 1 },
+                  "share": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "prompt_tokens": { "type": "integer", "minimum": 0 },
+                  "output_tokens": { "type": "integer", "minimum": 0 },
+                  "cost_usd": { "type": ["number", "null"], "minimum": 0 },
+                  "price_source": { "enum": ["override", "server", "local_default", "unpriced"] }
+                }
+              }
+            },
+            "local_share": { "type": "number", "minimum": 0, "maximum": 1, "description": "Share of requests routed to a non-cloud candidate." },
+            "free_share": { "type": "number", "minimum": 0, "maximum": 1, "description": "Share of requests routed to a candidate priced at zero." },
+            "routed_cost_usd": { "type": "number", "minimum": 0, "description": "Cost of the priced requests." },
+            "unpriced_requests": { "type": "integer", "minimum": 0 },
+            "baseline_model": { "type": "string" },
+            "baseline_cost_usd": { "type": "number", "minimum": 0, "description": "Estimated cost of sending every request to baseline_model, at the same token counts." },
+            "savings_usd": { "type": "number" },
+            "savings_pct": { "type": "number" }
+          }
         }
       }
     },
