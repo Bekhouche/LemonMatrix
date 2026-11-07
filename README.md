@@ -73,6 +73,19 @@ price, `--cost-baseline MODEL` picks the comparison model, and
 `--prompts-file` takes your own prompts (one per line, or JSONL). The baseline
 is priced on the same token counts, so it is an estimate.
 
+## Importing other tools' results
+
+`lemonmatrix import FILE...` reads results from
+[lemonade_lab](https://github.com/skywalk1411/lemonade_lab) (as published in
+amdaibenchmarks) and [LemonMetrics](https://github.com/lemonmetrics/lemonmetrics)
+`report.json` files, which carry Ryzen AI NPU/hybrid rows and energy
+estimates. Each file is normalized into `results/imported/<tool>/` and listed
+with `lemonmatrix imported-results`. These numbers did not go through
+LemonMatrix's validity checks, so they are marked `validated: false` and never
+appear on the leaderboard. Host names, commands, URLs and raw power samples are
+not copied. When several backends report the same number for one model, the
+import warns that the backend switch may not have taken effect.
+
 ## Dashboard
 
 `lemonmatrix dashboard` starts a local Flask app (default

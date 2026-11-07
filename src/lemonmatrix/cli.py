@@ -19,18 +19,20 @@ from .capabilities import (available_backends, available_compute_engines, availa
                            is_router_model, validate_combo_against_profile)
 from .client import BENCH_TIMEOUT, LemonadeClient, job_progress_percent
 from .discover import QUICK_SELECT_PORTS, expand_subnet, scan, scan_localhost
+from .importers import LEMONADE_LAB, LEMONMETRICS, import_result
 from .profile import DEFAULT_PORT, DEFAULT_PROFILE_DIR, Profile, build_url, connect_and_save
 from .prompt_sets import PROMPT_SETS, load_prompt_file
 from .results_store import (list_audiogen_results, list_classify_results, list_embeddings_results,
-                             list_imagegen_results, list_meshgen_results, list_rerank_results,
-                             list_results, list_stt_results, list_tts_results, load_trials,
-                             results_to_csv, save_audiogen_result, save_classify_result,
-                             save_embeddings_result, save_imagegen_result, save_meshgen_result,
-                             save_rerank_result, save_stt_result, save_trials, save_tts_result)
+                             list_imagegen_results, list_imported_results, list_meshgen_results,
+                             list_rerank_results, list_results, list_stt_results, list_tts_results,
+                             load_trials, results_to_csv, save_audiogen_result, save_classify_result,
+                             save_embeddings_result, save_imagegen_result, save_imported_result,
+                             save_meshgen_result, save_rerank_result, save_stt_result, save_trials,
+                             save_tts_result)
 from .routing_cost import parse_cost_override
 from .validate import (validate_audiogen_result, validate_classify_result, validate_embeddings_result,
-                        validate_imagegen_result, validate_meshgen_result, validate_rerank_result,
-                        validate_result, validate_stt_result, validate_tts_result)
+                        validate_imagegen_result, validate_imported_result, validate_meshgen_result,
+                        validate_rerank_result, validate_result, validate_stt_result, validate_tts_result)
 
 
 def _router_cost_options(func):
@@ -1890,7 +1892,8 @@ def validate_submission(paths: tuple[str, ...], results_dir: str) -> None:
     modality's own schema, since none of those are comparable to LLM token
     throughput and must never be mistaken for a model/router result. Files
     under a failures/ or trials/ directory are skipped -- neither is part of
-    the public leaderboard's data contract.
+    the public leaderboard's data contract. Files under imported/<tool>/
+    validate against the imported-result schema.
 
     Exits non-zero (failing the CI check) if any file fails to parse or
     fails schema validation.
@@ -1922,7 +1925,10 @@ def validate_submission(paths: tuple[str, ...], results_dir: str) -> None:
             failures.append((path, f"couldn't read/parse: {exc}"))
             continue
 
-        validator = _SUBMISSION_MODALITY_VALIDATORS.get(path.parent.name, validate_result)
+        if path.parent.parent.name == "imported":
+            validator = validate_imported_result
+        else:
+            validator = _SUBMISSION_MODALITY_VALIDATORS.get(path.parent.name, validate_result)
         try:
             validator(data)
         except jsonschema.ValidationError as exc:
@@ -1964,6 +1970,68 @@ def export(results_dir: str, profile_name: str | None, valid_only: bool, out_fil
         click.secho(f"Wrote {len(results)} row(s) to {out_file}", fg="green")
     else:
         click.echo(csv_text, nl=False)
+
+
+@cli.command("import")
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--source", type=click.Choice([LEMONADE_LAB, LEMONMETRICS]), default=None,
+              help="Source format (default: detect from the file).")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False), default="results", show_default=True)
+def import_results(paths: tuple[str, ...], source: str | None, out_dir: str) -> None:
+    """Import results from lemonade_lab (amdaibenchmarks) or LemonMetrics.
+
+    Each file becomes results/imported/<tool>/<id>.json, marked
+    validated: false: these numbers did not go through LemonMatrix's
+    validity checks and never appear on the leaderboard. Host names,
+    commands, URLs and raw power samples are not copied.
+
+    \b
+      lemonmatrix import amdaibenchmarks/results/*.json
+      lemonmatrix import lemonmetrics-site/data/results/*/*/report.json
+    """
+    failed = 0
+    for path in paths:
+        raw = Path(path).read_bytes()
+        try:
+            doc = import_result(json.loads(raw), raw, source)
+            validate_imported_result(doc)
+        except (ValueError, jsonschema.ValidationError) as exc:
+            click.secho(f"SKIP  {path}: {exc}", fg="yellow")
+            failed += 1
+            continue
+        out_path = save_imported_result(out_dir, doc)
+        click.secho(f"OK    {path} -> {out_path} ({len(doc['rows'])} row(s))", fg="green")
+        for warning in doc["validity"].get("warnings", []):
+            click.secho(f"      warning: {warning}", fg="yellow")
+    if failed:
+        raise SystemExit(1)
+
+
+@cli.command("imported-results")
+@click.option("--results-dir", type=click.Path(file_okay=False), default="results", show_default=True)
+def imported_results(results_dir: str) -> None:
+    """List imported rows, one line per model/backend/scenario."""
+    docs = list_imported_results(results_dir)
+    if not docs:
+        click.echo("No imported results. See `lemonmatrix import --help`.")
+        return
+    for doc in docs:
+        env = doc["environment"]
+        who = doc["source"].get("submitted_by")
+        click.secho(
+            f"{doc['source']['tool']}  {doc.get('measured_at') or '?'}  {env.get('cpu', '?')}"
+            + (f"  (by {who})" if who else ""),
+            bold=True,
+        )
+        for row in doc["rows"]:
+            scenario = f" [{row['scenario']}]" if row.get("scenario") else ""
+            energy = f"  {row['joules_per_token']:.3f} J/tok" if "joules_per_token" in row else ""
+            click.echo(
+                f"  {row['workload']:<9} {row['model']}{scenario}  {row['backend']}"
+                f" ({row.get('compute_engine', '?')}): {row['value']:.2f} {row['unit']}{energy}"
+            )
+        for warning in doc["validity"].get("warnings", []):
+            click.secho(f"  warning: {warning}", fg="yellow")
 
 
 @cli.command("trials")

@@ -147,3 +147,17 @@ def validate_meshgen_result(result: dict) -> None:
     are never mixed into the model/router leaderboard.
     """
     jsonschema.validate(instance=result, schema=load_meshgen_schema())
+
+
+def load_imported_schema() -> dict:
+    return _load_schema("imported_result.schema.json")
+
+
+def validate_imported_result(result: dict) -> None:
+    """Raises jsonschema.ValidationError if `result` doesn't conform.
+
+    Imported results come from other tools and skipped LemonMatrix's own
+    validity checks, so they have their own schema and never reach the
+    model/router leaderboard.
+    """
+    jsonschema.validate(instance=result, schema=load_imported_schema())

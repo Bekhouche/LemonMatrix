@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Bekhouche/LemonMatrix/schema/imported_result.schema.json",
+  "title": "LemonMatrix imported result",
+  "description": "Results produced by another Lemonade benchmark tool (lemonade_lab/amdaibenchmarks, LemonMetrics) and normalized into one shape. LemonMatrix's own validity checks never ran on these numbers, so they are kept apart from the model/router leaderboard and always carry validated: false.",
+  "type": "object",
+  "required": ["schema_version", "run_type", "import_id", "imported_at", "source", "environment", "rows", "validity"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "run_type": { "const": "imported" },
+    "import_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "First 16 hex digits of the source file's SHA-256." },
+    "imported_at": { "type": "string" },
+    "measured_at": { "type": ["string", "null"] },
+    "source": {
+      "type": "object",
+      "required": ["tool", "file_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "enum": ["lemonade_lab", "lemonmetrics"] },
+        "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "submitted_by": { "type": "string" },
+        "tool_version": { "type": "string" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": { "type": "string" },
+        "gpu": { "type": "string" },
+        "npu": { "type": "string" },
+        "os": { "type": "string" },
+        "memory_gb": { "type": "number", "minimum": 0 },
+        "lemonade_version": { "type": "string" }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runs": { "type": "integer", "minimum": 0 },
+        "warmup": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "power": {
+      "type": "object",
+      "required": ["available"],
+      "additionalProperties": false,
+      "properties": {
+        "available": { "type": "boolean" },
+        "avg_watts": { "type": "number", "minimum": 0 },
+        "baseline_watts": { "type": "number", "minimum": 0 }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["workload", "model", "backend", "value", "unit"],
+        "additionalProperties": false,
+        "properties": {
+          "workload": { "enum": ["llm", "embedding", "image_gen"] },
+          "model": { "type": "string" },
+          "backend": { "type": "string" },
+          "compute_engine": { "enum": ["cpu", "gpu", "npu", "hybrid"] },
+          "scenario": { "type": "string" },
+          "value": { "type": "number", "minimum": 0 },
+          "unit": { "type": "string" },
+          "ttft_ms": { "type": "number", "minimum": 0 },
+          "memory_gb": { "type": "number", "minimum": 0 },
+          "joules_per_token": { "type": "number", "minimum": 0 },
+          "joules_per_output_token": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "required": ["validated", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "validated": { "const": false },
+        "notes": { "type": "string" },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

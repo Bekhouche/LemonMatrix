@@ -508,3 +508,33 @@ def results_to_csv(results: list[dict]) -> str:
         }
         writer.writerow(row)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Imported results (from other benchmark tools; never on the leaderboard --
+# see imported_result.schema.json).
+# ---------------------------------------------------------------------------
+
+def save_imported_result(results_dir: Path | str, doc: dict) -> Path:
+    """Persist as <results_dir>/imported/<tool>/<import_id>.json.
+
+    Two levels deep, so list_results()'s <profile>/<run_id>.json glob never
+    picks it up. Named by the source file's hash, so re-importing the same file
+    overwrites instead of duplicating.
+    """
+    out_dir = Path(results_dir) / "imported" / doc["source"]["tool"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{doc['import_id']}.json"
+    path.write_text(json.dumps(doc, indent=2))
+    return path
+
+
+def list_imported_results(results_dir: Path | str) -> list[dict]:
+    """All imported documents, newest measurement first."""
+    results = []
+    for path in Path(results_dir).glob("imported/*/*.json"):
+        try:
+            results.append(json.loads(path.read_text()))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return sorted(results, key=lambda r: r.get("measured_at") or "", reverse=True)
