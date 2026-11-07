@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Add a model · {{ profile.name }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Add a model to {{ profile.name }}</h2>
+  <p class="muted">
+    Search Hugging Face for GGUF repos, pick a quantization, then pull it. Pulling downloads real model weights (often several GB) as a background job on Lemonade itself -- it keeps running even if you leave this page, and you can start more than one at a time. Track progress on the <a href="{{ url_for('profile_downloads', name=profile.name) }}">Downloads page</a>.
+  </p>
+  <form class="filters" method="get" action="{{ url_for('profile_models_add', name=profile.name) }}">
+    <div style="flex:1;">
+      <label for="q">Search Hugging Face</label>
+      <input type="text" id="q" name="q" value="{{ query }}" placeholder="llama-3.2-1b" style="width:100%;">
+    </div>
+    <div><button class="btn" type="submit">Search</button></div>
+  </form>
+
+  {% if error %}
+    <p class="empty">{{ error }}</p>
+  {% endif %}
+</div>
+
+{% if search_results is not none %}
+<div class="card">
+  <h2>Results for "{{ query }}"</h2>
+  {% if not search_results %}
+    <p class="empty">No repositories found.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Repository</th><th>Downloads</th><th>Likes</th><th></th></tr></thead>
+      <tbody>
+        {% for r in search_results %}
+          <tr>
+            <td>
+              <strong>{{ r.display_name or r.repository_id }}</strong><br>
+              <span class="muted">{{ r.repository_id }}</span>
+            </td>
+            <td class="num">{{ r.downloads }}</td>
+            <td class="num">{{ r.likes }}</td>
+            <td>
+              {% if r.has_gguf %}
+                <a class="btn secondary" href="{{ url_for('profile_models_add', name=profile.name, q=query, checkpoint=r.repository_id) }}">View variants</a>
+              {% else %}
+                <span class="muted">no GGUF</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if variants %}
+<div class="card">
+  <h2>Variants of {{ checkpoint }}</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Quantization</th><th>Size</th><th>Model name</th><th></th></tr></thead>
+      <tbody>
+        {% for v in variants.variants %}
+          {% set gb = ("%.2f"|format(v.size_bytes / 1000000000)) if v.size_bytes else "unknown size" %}
+          <tr>
+            <td><code>{{ v.name }}</code></td>
+            <td class="num">{{ gb }} GB</td>
+            <td>
+              <form method="post" action="{{ url_for('profile_pull_model', name=profile.name) }}" style="display:flex; gap:0.4rem;" data-confirm-message="Start downloading {{ v.name }} ({{ gb }} GB) in the background?" onsubmit="return confirm(this.dataset.confirmMessage);">
+                <input type="text" name="model_name" value="user.{{ variants.suggested_name }}-{{ v.name }}" required>
+                <input type="hidden" name="recipe" value="{{ variants.recipe }}">
+                <input type="hidden" name="checkpoint" value="{{ checkpoint }}:{{ v.name }}">
+                <button class="btn secondary" type="submit">Pull</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

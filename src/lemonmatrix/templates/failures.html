@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Failures · {{ profile_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Failure log for {{ profile_name }}</h2>
+  <p class="muted">
+    Runs that raised before producing a result -- a crash, a schema violation, or an unreachable instance -- rather than completing (even as an invalid result). Saved here so a real environment problem doesn't just vanish with the page.
+  </p>
+
+  {% if not failures %}
+    <p class="empty">No failures recorded yet.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Timestamp</th><th>Stage</th><th>Model</th><th>Backend</th><th>Engine</th><th>Power</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for f in failures %}
+          <tr>
+            <td class="muted">{{ f.timestamp }}</td>
+            <td>{{ f.stage }}{% if f.batch_id %} <span class="muted">(sweep {{ f.batch_id }})</span>{% endif %}</td>
+            <td>{{ f.attempted.model_name or "–" }}<br><span class="muted">{{ f.attempted.quantization or "" }}</span></td>
+            <td><code>{{ f.attempted.backend or "–" }}</code></td>
+            <td>{% if f.attempted.compute_engine %}<span class="chip {{ f.attempted.compute_engine }}">{{ f.attempted.compute_engine }}</span>{% else %}–{% endif %}</td>
+            <td>{{ f.attempted.power_state or "–" }}</td>
+            <td class="status invalid">{{ f.error }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

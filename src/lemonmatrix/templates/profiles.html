@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Profiles · LemonMatrix{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Saved profiles</h2>
+  {% if not profiles %}
+    <p class="empty">No profiles yet. Detect a local instance below, or add one manually.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Status</th><th>Name</th><th>URL</th><th>GPU</th><th>CPU</th><th>Lemonade</th><th></th></tr></thead>
+      <tbody>
+        {% for p in profiles %}
+          {% set online = online_by_name.get(p.name) %}
+          <tr>
+            <td><span class="status {{ 'online' if online else 'offline' }}">{{ "online" if online else "offline" }}</span></td>
+            <td><a href="{{ url_for('profile_detail', name=p.name) }}">{{ p.name }}</a></td>
+            <td class="muted">{{ p.base_url }}</td>
+            <td>
+              {# The discrete accelerator (if any) is what actually matters for
+                 AI benchmarking, unlike "Device" -- which, on servers without an
+                 OEM System string, silently fell back to repeating the CPU name. #}
+              {% if p.environment.get('dgpu') %}
+                {{ p.environment['dgpu'] }}{% if p.environment.get('dgpu_family') %} <span class="muted">({{ p.environment['dgpu_family'] }})</span>{% endif %}
+              {% elif p.environment.get('igpu') %}
+                {{ p.environment['igpu'] }}{% if p.environment.get('igpu_family') %} <span class="muted">({{ p.environment['igpu_family'] }})</span>{% endif %}
+              {% else %}–{% endif %}
+            </td>
+            <td>{{ p.environment.get('cpu', '–') }}</td>
+            <td>{{ p.environment.get('lemonade_version', '–') }}</td>
+            <td><a href="{{ url_for('profile_run', name=p.name) }}">Run sweep →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Detect a local instance</h2>
+  <p class="muted">Scans 127.0.0.1 across Lemonade's quick-select ports. Add a subnet (e.g. 192.168.1.0/24) to also scan a LAN range -- this reaches out to every host in that range, so only use it on your own network.</p>
+  <form class="filters" method="post" action="{{ url_for('profiles_detect') }}">
+    <div>
+      <label for="ports">Ports (optional)</label>
+      <input type="text" id="ports" name="ports" placeholder="13305,8000">
+    </div>
+    <div>
+      <label for="subnet">Subnet (optional)</label>
+      <input type="text" id="subnet" name="subnet" placeholder="192.168.1.0/24">
+    </div>
+    <div><button class="btn" type="submit">Scan</button></div>
+  </form>
+
+  {% if detected %}
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>URL</th><th>Detected as</th><th></th></tr></thead>
+        <tbody>
+          {% for d in detected %}
+            <tr>
+              <td>{{ d.base_url }}</td>
+              <td class="muted">{{ d.label }}</td>
+              <td>
+                <form class="inline" method="post" action="{{ url_for('profiles_add') }}" style="display:flex; gap:0.4rem;">
+                  <input type="hidden" name="url" value="{{ d.base_url }}">
+                  <input type="text" name="name" placeholder="profile name" required>
+                  <button class="btn secondary" type="submit">Save</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Add manually</h2>
+  <form method="post" action="{{ url_for('profiles_add') }}">
+    <div class="form-grid">
+      <div><label for="name">Name</label><input type="text" id="name" name="name" required></div>
+      <div><label for="host">Host</label><input type="text" id="host" name="host" value="localhost"></div>
+      <div><label for="port">Port</label><input type="number" id="port" name="port" value="{{ default_port }}"></div>
+      <div><label for="scheme">Scheme</label>
+        <select id="scheme" name="scheme"><option value="http">http</option><option value="https">https</option></select>
+      </div>
+      <div><label for="token">Token (optional)</label><input type="text" id="token" name="token"></div>
+      <div><label for="url">Full URL (overrides host/port)</label><input type="text" id="url" name="url" placeholder="https://my-cloud-endpoint/api"></div>
+    </div>
+    <button class="btn" type="submit">Connect &amp; save</button>
+  </form>
+</div>
+{% endblock %}

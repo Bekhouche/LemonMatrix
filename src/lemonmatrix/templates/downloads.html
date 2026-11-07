@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Downloads · {{ profile.name }}{% endblock %}
+{% block content %}
+{% if jobs %}<meta http-equiv="refresh" content="2">{% endif %}
+
+<div class="card">
+  <h2>Downloads for {{ profile.name }}</h2>
+  <p class="muted">
+    These are server-owned jobs on Lemonade itself -- they keep running even if you close this page or restart the dashboard, and you can start several at once.
+    <a href="{{ url_for('profile_models_add', name=profile.name) }}">Add another model →</a>
+  </p>
+
+  {% if error %}
+    <p class="empty">Couldn't reach this instance right now ({{ error }}).</p>
+  {% elif not jobs %}
+    <p class="empty">No downloads yet.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Model</th><th>Status</th><th>Progress</th><th>File</th><th></th></tr></thead>
+      <tbody>
+        {% for job in jobs %}
+          <tr>
+            <td><code>{{ job.model_name }}</code></td>
+            <td>
+              <span class="status {{ "valid" if job.status == "completed" else ("invalid" if job.status == "error" else "") }}">{{ job.status }}</span>
+            </td>
+            <td>
+              <div class="progress-track">
+                <div class="progress-fill {{ "complete" if job.status == "completed" else ("error" if job.status == "error" else "") }}" style="width: {{ job._progress_percent | round(1) }}%;"></div>
+              </div>
+              <span class="progress-label">{{ job._progress_percent | round(1) }}%</span>
+            </td>
+            <td class="muted">
+              {% if job.file %}{{ job.file }} ({{ job.file_index }}/{{ job.total_files }}){% else %}–{% endif %}
+              {% if job.error %}<br><span class="status invalid">{{ job.error }}</span>{% endif %}
+            </td>
+            <td style="white-space: nowrap;">
+              {% if job.status == "downloading" %}
+                <form method="post" action="{{ url_for('profile_downloads_control', name=profile.name) }}" style="display:inline;">
+                  <input type="hidden" name="id" value="{{ job.id }}">
+                  <input type="hidden" name="action" value="pause">
+                  <button class="btn secondary" type="submit">Pause</button>
+                </form>
+                <form method="post" action="{{ url_for('profile_downloads_control', name=profile.name) }}" style="display:inline;">
+                  <input type="hidden" name="id" value="{{ job.id }}">
+                  <input type="hidden" name="action" value="cancel">
+                  <button class="btn secondary" type="submit">Cancel</button>
+                </form>
+              {% elif job.status == "paused" %}
+                <form method="post" action="{{ url_for('profile_downloads_control', name=profile.name) }}" style="display:inline;">
+                  <input type="hidden" name="id" value="{{ job.id }}">
+                  <input type="hidden" name="action" value="cancel">
+                  <button class="btn secondary" type="submit">Cancel</button>
+                </form>
+              {% else %}
+                <form method="post" action="{{ url_for('profile_downloads_control', name=profile.name) }}" style="display:inline;">
+                  <input type="hidden" name="id" value="{{ job.id }}">
+                  <input type="hidden" name="action" value="remove">
+                  <button class="btn secondary" type="submit">Dismiss</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard · LemonMatrix{% endblock %}
+{% block content %}
+
+<div class="stat-row">
+  <div class="stat-tile"><div class="value">{{ stats.total }}</div><div class="label">Total runs</div></div>
+  <div class="stat-tile"><div class="value">{{ stats.valid }}</div><div class="label">Valid runs</div></div>
+  <div class="stat-tile"><div class="value">{{ stats.profiles }}</div><div class="label">Profiles with results</div></div>
+  <div class="stat-tile">
+    <a class="btn secondary" href="{{ url_for('export_results_csv') }}{% if filters.profile %}?profile={{ filters.profile }}{% endif %}{% if filters.valid_only %}&amp;valid_only=1{% endif %}" style="font-size:.85rem">⬇ Export CSV</a>
+    <div class="label">current filter</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Filter</h2>
+  <form class="filters" method="get" action="{{ url_for('index') }}">
+    <div>
+      <label for="profile">Profile</label>
+      <select name="profile" id="profile">
+        <option value="">All</option>
+        {% for p in facets.profiles %}
+          <option value="{{ p }}" {{ "selected" if filters.profile == p }}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="engine">Engine</label>
+      <select name="engine" id="engine">
+        <option value="">All</option>
+        {% for e in facets.engines %}
+          <option value="{{ e }}" {{ "selected" if filters.engine == e }}>{{ e }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="backend">Backend</label>
+      <select name="backend" id="backend">
+        <option value="">All</option>
+        {% for b in facets.backends %}
+          <option value="{{ b }}" {{ "selected" if filters.backend == b }}>{{ b }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="model">Model contains</label>
+      <input type="text" name="model" id="model" value="{{ filters.model }}">
+    </div>
+    <div>
+      <label for="valid_only">&nbsp;</label>
+      <label><input type="checkbox" name="valid_only" id="valid_only" value="1" {{ "checked" if filters.valid_only }}> Valid only</label>
+    </div>
+    <div><button class="btn" type="submit">Apply</button></div>
+    <input type="hidden" name="filtered" value="1">
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="dir" value="{{ sort_dir }}">
+  </form>
+</div>
+
+<div class="card">
+  <h2>Results</h2>
+  {% if not results %}
+    {% if stats.total %}
+      <p class="empty">No results match the current filters. {{ stats.total - stats.valid }} run(s) are hidden by the "Valid only" filter -- uncheck it to see them.</p>
+    {% else %}
+      <p class="empty">No results yet. Add a profile, then run a sweep against it to populate the leaderboard.</p>
+    {% endif %}
+  {% else %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          {% for key, label, _ in columns %}
+            {% set args = request.args.to_dict() %}
+            {% set _ = args.update({'sort': key, 'dir': next_dir(key)}) %}
+            <th><a href="{{ url_for('index', **args) }}">{{ label }}{% if sort_key == key %} {{ "▲" if sort_dir == "asc" else "▼" }}{% endif %}</a></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+          <tr>
+            {% for key, _, kind in columns %}
+              {% set value = get(r, key) %}
+              {% if key == "model.name" %}
+                <td><a href="{{ url_for('result_detail', profile=r._profile, run_id=r._run_id) }}">{{ value or "–" }}</a></td>
+              {% elif kind == "chip" %}
+                <td>{% if value %}<span class="chip {{ value }}">{{ value }}</span>{% else %}–{% endif %}</td>
+              {% elif kind == "status" %}
+                <td><span class="status {{ "valid" if value else "invalid" }}">{{ "valid" if value else "invalid" }}</span></td>
+              {% elif kind == "num1" %}
+                <td class="num">{{ "%.1f"|format(value) if value is not none else "–" }}</td>
+              {% elif kind == "num0" %}
+                <td class="num">{{ "%.0f"|format(value) if value is not none else "–" }}</td>
+              {% elif kind == "num3" %}
+                <td class="num">{{ "%.3f"|format(value) if value is not none else "–" }}</td>
+              {% else %}
+                <td>{{ value if value is not none else "–" }}</td>
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+{% if failures %}
+<div class="card">
+  <h2>Failed runs</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Profile</th>
+          <th>Model</th>
+          <th>Quant</th>
+          <th>Engine</th>
+          <th>Backend</th>
+          <th>Stage</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in failures %}
+          <tr>
+            <td class="muted" style="white-space:nowrap">{{ f.timestamp[:19].replace("T"," ") if f.timestamp else "–" }}</td>
+            <td>{{ f._profile or "–" }}</td>
+            <td>{{ f.attempted.model_name if f.attempted else "–" }}</td>
+            <td>{{ f.attempted.quantization if f.attempted else "–" }}</td>
+            <td>{% set e = f.attempted.compute_engine if f.attempted else None %}
+                {% if e %}<span class="chip {{ e }}">{{ e }}</span>{% else %}–{% endif %}</td>
+            <td>{{ f.attempted.backend if f.attempted else "–" }}</td>
+            <td><span class="status invalid">{{ f.stage or "–" }}</span></td>
+            <td style="max-width:28rem;white-space:normal;color:#e55">{{ f.error or "–" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

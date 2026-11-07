@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block title %}Run queue · {{ profile.name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Run queue · {{ profile.name }}</h2>
+  <p class="muted">
+    Build a list of specific runs -- any mix of models, quantizations, engines, backends, power states,
+    even router runs -- then start the whole queue. Lemonade holds one model at a time, so the queue runs
+    sequentially in the background, exactly like <a href="{{ url_for('profile_sweep', name=profile.name) }}">Sweep</a>
+    (unlike Sweep, which is one model's pulled quantizations × a Cartesian product of axes, this queue is
+    whatever specific combinations you add). Only combinations this profile can actually run are selectable.
+  </p>
+
+  {% if running_batch %}
+    <p class="empty">
+      A sweep/queue is already running ({{ running_batch.completed_count }}/{{ running_batch.total_count }} done) --
+      <a href="{{ url_for('sweep_status', name=profile.name, batch_id=running_batch.id) }}">view progress</a> before starting another.
+    </p>
+  {% endif %}
+
+  {% if capabilities.error %}
+    <p class="empty">Couldn't reach this instance ({{ capabilities.error }}).</p>
+  {% elif not models_by_base %}
+    <p class="empty">No models pulled yet -- <a href="{{ url_for('profile_models_add', name=profile.name) }}">pull one first</a>.</p>
+  {% else %}
+    {% set base_names = models_by_base.keys() | list %}
+    {% set first_variants = models_by_base[base_names[0]] %}
+
+    <div class="card" style="margin: 0 0 1rem;">
+      <h2>Add a run</h2>
+      <div style="grid-column: 1 / -1; margin-bottom: 0.6rem;">
+        <label>Run type</label>
+        <label style="display:inline-block; margin-right: 1rem; font-weight: normal;">
+          <input type="radio" id="add_run_type_model" name="add_run_type" value="model" checked onchange="lmToggleAddRunType()"> Model
+        </label>
+        <label style="display:inline-block; font-weight: normal;">
+          <input type="radio" id="add_run_type_router" name="add_run_type" value="router" onchange="lmToggleAddRunType()"> Router
+        </label>
+      </div>
+
+      <div id="add_model_fields" class="form-grid" style="display: contents;">
+        <div>
+          <label for="add_model_base">Model</label>
+          <select id="add_model_base" onchange="lmOnBaseChange(this)">
+            {% for base in base_names %}<option value="{{ base }}">{{ base }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="add_model_class">Model class</label>
+          <select id="add_model_class">
+            <option value="dense">dense</option><option value="moe">moe</option>
+          </select>
+        </div>
+        <div>
+          <label for="add_quantization">Quantization</label>
+          <select id="add_quantization" onchange="lmOnQuantChange(this)">
+            {% for v in first_variants %}
+              <option value="{{ v.quantization }}" data-model-id="{{ v.id }}" data-context="{{ v.context_length }}">
+                {{ v.quantization or "(unknown)" }}{% if v.size_gb %} ({{ "%.1f"|format(v.size_gb) }} GB){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <input type="hidden" id="add_model_name" value="{{ first_variants[0].id }}">
+        </div>
+        <div>
+          <label for="add_context_length">Context length</label>
+          <input type="number" id="add_context_length" value="{{ first_variants[0].context_length }}">
+        </div>
+        <div>
+          <label for="add_compute_engine">Engine</label>
+          {% if capabilities.engines %}
+            <select id="add_compute_engine" onchange="lmRestrictOptions()">
+              {% for e in capabilities.engines %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+              <option value="hybrid">hybrid</option>
+            </select>
+          {% else %}
+            <select id="add_compute_engine" onchange="lmRestrictOptions()">
+              <option value="cpu">cpu</option><option value="igpu">igpu</option>
+              <option value="dgpu">dgpu</option><option value="npu">npu</option><option value="hybrid">hybrid</option>
+            </select>
+          {% endif %}
+        </div>
+        <div>
+          <label for="add_backend">Backend</label>
+          {% if capabilities.backends_installed %}
+            <select id="add_backend" onchange="lmRestrictOptions()">
+              {% for b in capabilities.backends_installed %}
+                <option value="{{ b.backend }}">{{ b.recipe_display }} · {{ b.backend_key }}{% if b.version %} ({{ b.version }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          {% elif capabilities.backends %}
+            <select id="add_backend" onchange="lmRestrictOptions()">
+              {% for b in capabilities.backends %}
+                <option value="{{ b.backend }}" data-installed="{{ '1' if b.state == 'installed' else '0' }}" {% if b.state != 'installed' %}disabled{% endif %}>
+                  {{ b.recipe_display }} · {{ b.backend_key }} ({{ b.state }})
+                </option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <input type="text" id="add_backend" placeholder="llamacpp-vulkan">
+          {% endif %}
+          <div id="add_compat_warn" style="display:none; color: var(--status-critical); margin-top: 0.3rem; font-size: 0.85rem;"></div>
+        </div>
+      </div>
+
+      <div id="add_router_fields" style="display:none; margin-top: 0.6rem;">
+        <label for="add_router_model">Router</label>
+        {% if routers %}
+          <select id="add_router_model">
+            {% for r in routers %}<option value="{{ r.id }}">{{ r.id }}</option>{% endfor %}
+          </select>
+        {% else %}
+          <input type="text" id="add_router_model" placeholder="e.g. my-collection-router">
+          <div class="muted">No routers detected on this profile -- enter the router's registered name manually.</div>
+        {% endif %}
+        <div><label for="add_router_context_length">Context length</label><input type="number" id="add_router_context_length" value="4096"></div>
+      </div>
+
+      <div class="form-grid" style="margin-top: 0.6rem;">
+        <div>
+          <label for="add_power_state">Power state</label>
+          <select id="add_power_state">
+            <option value="plugged">plugged</option>
+            <option value="battery">battery</option>
+            <option value="power_capped">power_capped</option>
+          </select>
+        </div>
+        <div style="align-self: end;"><button class="btn" type="button" id="add_button" onclick="lmAddToQueue()">+ Add to queue</button></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin: 0 0 1rem;">
+      <h2>Queue (<span id="queue_count">0</span>)</h2>
+      <div id="queue_empty" class="empty">Nothing queued yet -- add a run above.</div>
+      <div id="queue_table_wrap" class="table-scroll" style="display:none;">
+        <table>
+          <thead><tr><th>Model</th><th>Quant</th><th>Engine</th><th>Backend</th><th>Power</th><th></th></tr></thead>
+          <tbody id="queue_tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('profile_queue', name=profile.name) }}" onsubmit="return lmConfirmQueue();">
+      <input type="hidden" id="queue_json" name="queue_json" value="[]">
+      <div class="card">
+        <h2>Run settings (applied to every queued item)</h2>
+        <div class="form-grid">
+          <div><label for="power_cap_w">Power cap (W, optional)</label><input type="number" id="power_cap_w" name="power_cap_w"></div>
+          <div><label for="warmup_trials">Warmup trials</label><input type="number" id="warmup_trials" name="warmup_trials" value="2"></div>
+          <div><label for="measured_trials">Measured trials</label><input type="number" id="measured_trials" name="measured_trials" value="5"></div>
+          <div><label for="max_tokens">Max tokens</label><input type="number" id="max_tokens" name="max_tokens" value="256"></div>
+          <div><label for="energy_price_usd_per_kwh">Electricity price ($/kWh, optional)</label><input type="number" step="0.01" id="energy_price_usd_per_kwh" name="energy_price_usd_per_kwh"></div>
+          <div><label for="hardware_cost_usd">Hardware cost ($, optional)</label><input type="number" step="0.01" id="hardware_cost_usd" name="hardware_cost_usd"></div>
+          <div><label for="hardware_lifetime_hours">Hardware lifetime (hours, optional)</label><input type="number" step="1" id="hardware_lifetime_hours" name="hardware_lifetime_hours"></div>
+          <div><label>&nbsp;</label><label><input type="checkbox" id="exclusive_run" name="exclusive_run" checked> Exclusive run (no competing workload)</label></div>
+          <div><label>&nbsp;</label><label><input type="checkbox" id="via_job_engine" name="via_job_engine" title="Execute each queued model item as a single durable Lemonade job -- unavailable while the queue contains a router item."> Execute via Lemonade's job engine</label></div>
+        </div>
+        <button class="btn" type="submit" id="start_queue_button" disabled>Start queue</button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+{% if models_by_base %}
+<script>
+  var LM_MODELS_BY_BASE = {{ models_by_base_json | safe }};
+  var LM_COMPAT = {{ compat_map_json | safe }};
+  var LM_MAX = {{ max_combinations }};
+  var lmQueue = [];
+
+  function lmOnBaseChange(select) {
+    var variants = LM_MODELS_BY_BASE[select.value] || [];
+    var quantSelect = document.getElementById("add_quantization");
+    quantSelect.innerHTML = "";
+    variants.forEach(function (v) {
+      var opt = document.createElement("option");
+      opt.value = v.quantization;
+      opt.dataset.modelId = v.id;
+      opt.dataset.context = v.context_length;
+      opt.textContent = (v.quantization || "(unknown)") + (v.size_gb ? " (" + v.size_gb.toFixed(1) + " GB)" : "");
+      quantSelect.appendChild(opt);
+    });
+    lmOnQuantChange(quantSelect);
+  }
+
+  function lmOnQuantChange(select) {
+    var opt = select.selectedOptions[0];
+    if (!opt) return;
+    document.getElementById("add_model_name").value = opt.dataset.modelId;
+    document.getElementById("add_context_length").value = opt.dataset.context;
+  }
+
+  // Disables (rather than merely warning about) any backend option
+  // incompatible with the selected engine, and vice versa -- so an
+  // impossible pair can't be selected in the first place, not just
+  // flagged after the fact. An option already disabled for being
+  // "not installed" (data-installed="0") stays disabled regardless of
+  // engine compatibility.
+  function lmRestrictOptions() {
+    var engineSel = document.getElementById("add_compute_engine");
+    var backendSel = document.getElementById("add_backend");
+    if (!engineSel || !backendSel || backendSel.tagName !== "SELECT") return;
+
+    var engine = engineSel.value;
+    Array.from(backendSel.options).forEach(function (opt) {
+      if (opt.dataset.installed === "0") { opt.disabled = true; return; }
+      var allowed = LM_COMPAT[opt.value];
+      opt.disabled = !(!allowed || allowed.length === 0 || allowed.indexOf(engine) !== -1);
+    });
+    if (backendSel.selectedOptions[0] && backendSel.selectedOptions[0].disabled) {
+      var firstOk = Array.from(backendSel.options).find(function (o) { return !o.disabled; });
+      if (firstOk) backendSel.value = firstOk.value;
+    }
+
+    var allowedForBackend = LM_COMPAT[backendSel.value];
+    Array.from(engineSel.options).forEach(function (opt) {
+      opt.disabled = !(!allowedForBackend || allowedForBackend.length === 0 || allowedForBackend.indexOf(opt.value) !== -1);
+    });
+    if (engineSel.selectedOptions[0] && engineSel.selectedOptions[0].disabled) {
+      var firstOkEngine = Array.from(engineSel.options).find(function (o) { return !o.disabled; });
+      if (firstOkEngine) engineSel.value = firstOkEngine.value;
+    }
+
+    var warn = document.getElementById("add_compat_warn");
+    var stillBad = backendSel.selectedOptions[0] && backendSel.selectedOptions[0].disabled;
+    warn.style.display = stillBad ? "block" : "none";
+    if (stillBad) warn.textContent = "No backend on this profile is compatible with " + engine + ".";
+  }
+
+  function lmToggleAddRunType() {
+    var isRouter = document.getElementById("add_run_type_router").checked;
+    document.getElementById("add_model_fields").style.display = isRouter ? "none" : "contents";
+    document.getElementById("add_router_fields").style.display = isRouter ? "block" : "none";
+  }
+
+  function lmHasRouterItem() {
+    return lmQueue.some(function (item) { return item.run_type === "router"; });
+  }
+
+  function lmAddToQueue() {
+    var isRouter = document.getElementById("add_run_type_router").checked;
+    var powerState = document.getElementById("add_power_state").value;
+    var item;
+    if (isRouter) {
+      var routerModel = document.getElementById("add_router_model").value.trim();
+      if (!routerModel) { alert("Enter or pick a router first."); return; }
+      item = {
+        run_type: "router",
+        model_name: routerModel,
+        context_length: parseInt(document.getElementById("add_router_context_length").value || "4096", 10),
+        power_state: powerState,
+      };
+    } else {
+      var backendEl = document.getElementById("add_backend");
+      var backendVal = backendEl.value;
+      if (backendEl.tagName === "SELECT" && backendEl.selectedOptions[0] && backendEl.selectedOptions[0].disabled) {
+        alert("That engine/backend pair isn't compatible -- pick a different one.");
+        return;
+      }
+      item = {
+        run_type: "model",
+        model_name: document.getElementById("add_model_name").value,
+        model_class: document.getElementById("add_model_class").value,
+        quantization: document.getElementById("add_quantization").value,
+        context_length: parseInt(document.getElementById("add_context_length").value || "4096", 10),
+        compute_engine: document.getElementById("add_compute_engine").value,
+        backend: backendVal,
+        power_state: powerState,
+      };
+    }
+    lmQueue.push(item);
+    lmRenderQueue();
+  }
+
+  function lmRemoveFromQueue(index) {
+    lmQueue.splice(index, 1);
+    lmRenderQueue();
+  }
+
+  function lmRenderQueue() {
+    document.getElementById("queue_json").value = JSON.stringify(lmQueue);
+    document.getElementById("queue_count").textContent = lmQueue.length;
+    document.getElementById("queue_empty").style.display = lmQueue.length ? "none" : "block";
+    document.getElementById("queue_table_wrap").style.display = lmQueue.length ? "block" : "none";
+    document.getElementById("start_queue_button").disabled = lmQueue.length === 0 || lmQueue.length > LM_MAX;
+
+    var jobEngine = document.getElementById("via_job_engine");
+    var hasRouter = lmHasRouterItem();
+    jobEngine.disabled = hasRouter;
+    if (hasRouter) jobEngine.checked = false;
+
+    var tbody = document.getElementById("queue_tbody");
+    tbody.innerHTML = "";
+    lmQueue.forEach(function (item, idx) {
+      var tr = document.createElement("tr");
+      if (item.run_type === "router") {
+        tr.innerHTML =
+          "<td>" + item.model_name + " <span class=\"muted\">(router)</span></td>" +
+          "<td>–</td><td><span class=\"chip router\">router</span></td><td><code>collection.router</code></td>" +
+          "<td>" + item.power_state + "</td><td></td>";
+      } else {
+        tr.innerHTML =
+          "<td>" + item.model_name + "</td>" +
+          "<td>" + (item.quantization || "–") + "</td>" +
+          "<td><span class=\"chip " + item.compute_engine + "\">" + item.compute_engine + "</span></td>" +
+          "<td><code>" + item.backend + "</code></td>" +
+          "<td>" + item.power_state + "</td><td></td>";
+      }
+      var removeCell = tr.lastElementChild;
+      var removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn secondary";
+      removeBtn.textContent = "Remove";
+      removeBtn.onclick = function () { lmRemoveFromQueue(idx); };
+      removeCell.appendChild(removeBtn);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function lmConfirmQueue() {
+    return confirm("Run " + lmQueue.length + " queued item(s) sequentially in the background?");
+  }
+
+  lmRestrictOptions();
+</script>
+{% endif %}
+{% endblock %}

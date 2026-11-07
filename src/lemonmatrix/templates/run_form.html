@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Run sweep · {{ profile.name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Run a sweep against {{ profile.name }}</h2>
+  <p class="muted">This runs synchronously — the page will wait for warmup + measured trials to finish before redirecting. OS is fixed by this profile, not a per-run choice.</p>
+  {% if capabilities.error %}
+    <p class="empty">Couldn't reach this instance ({{ capabilities.error }}) — engine and backend fall back to free text.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('profile_run', name=profile.name) }}">
+    <div class="form-grid">
+      {# ── Run type ───────────────────────────────────────────────── #}
+      <div style="grid-column: 1 / -1;">
+        <label>Run type</label>
+        <label style="display:inline-block; margin-right: 1rem; font-weight: normal;">
+          <input type="radio" id="run_type_model" name="run_type" value="model" checked onchange="lmToggleRunType()"> Model
+        </label>
+        <label style="display:inline-block; font-weight: normal;">
+          <input type="radio" id="run_type_router" name="run_type" value="router" onchange="lmToggleRunType()"> Router <span class="muted">(a Lemonade collection.router -- engine/backend/quant are auto-set)</span>
+        </label>
+      </div>
+
+      <div id="model_fields" style="display: contents;">
+      {# ── Model ──────────────────────────────────────────────────── #}
+      {% if models_by_base %}
+        {% set base_names = models_by_base.keys() | list %}
+        {% set first_variants = models_by_base[base_names[0]] %}
+        <div>
+          <label for="model_base">Model</label>
+          <select id="model_base" name="model_base_display" onchange="lmOnBaseChange(this)">
+            {% for base in base_names %}<option value="{{ base }}">{{ base }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="model_class">Model class</label>
+          <select id="model_class" name="model_class">
+            <option value="dense">dense</option><option value="moe">moe</option>
+          </select>
+        </div>
+        <div>
+          <label for="quantization">Quantization</label>
+          <select id="quantization" name="quantization" onchange="lmOnQuantChange(this)">
+            {% for v in first_variants %}
+              <option value="{{ v.quantization }}" data-model-id="{{ v.id }}" data-context="{{ v.context_length }}">
+                {{ v.quantization or "(unknown)" }}{% if v.size_gb %} ({{ "%.1f"|format(v.size_gb) }} GB){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <input type="hidden" id="model_name" name="model_name" value="{{ first_variants[0].id }}">
+          <div class="muted">Only already-pulled quantizations appear here — <a href="{{ url_for('profile_models_add', name=profile.name) }}">pull another</a> to add more.</div>
+        </div>
+        <div>
+          <label for="context_length">Context length</label>
+          <input type="number" id="context_length" name="context_length" required value="{{ first_variants[0].context_length }}">
+        </div>
+      {% else %}
+        <div>
+          <label for="model_name">Model</label>
+          <input type="text" id="model_name" name="model_name" required placeholder="e.g. Llama-3.1-8B-Instruct-GGUF">
+          <div class="muted">No models pulled yet — <a href="{{ url_for('profile_models_add', name=profile.name) }}">add one first</a>.</div>
+        </div>
+        <div>
+          <label for="model_class">Model class</label>
+          <select id="model_class" name="model_class">
+            <option value="dense">dense</option><option value="moe">moe</option>
+          </select>
+        </div>
+        <div>
+          <label for="quantization">Quantization</label>
+          <input type="text" id="quantization" name="quantization" required placeholder="Q4_K_M">
+        </div>
+        <div>
+          <label for="context_length">Context length</label>
+          <input type="number" id="context_length" name="context_length" required value="4096">
+        </div>
+      {% endif %}
+
+      {# ── Engine ─────────────────────────────────────────────────── #}
+      <div>
+        <label for="compute_engine">Engine</label>
+        {% if capabilities.engines %}
+          <select id="compute_engine" name="compute_engine" onchange="lmCheckCompat()">
+            {% for e in capabilities.engines %}
+              <option value="{{ e }}">{{ e }}</option>
+            {% endfor %}
+            <option value="hybrid">hybrid</option>
+          </select>
+          <div class="muted">Engines detected on this hardware by Lemonade.</div>
+        {% else %}
+          <select id="compute_engine" name="compute_engine" onchange="lmCheckCompat()">
+            <option value="cpu">cpu</option>
+            <option value="igpu">igpu</option>
+            <option value="dgpu">dgpu</option>
+            <option value="npu">npu</option>
+            <option value="hybrid">hybrid</option>
+          </select>
+          <div class="muted">Instance offline — showing all possible engines.</div>
+        {% endif %}
+      </div>
+
+      {# ── Backend ────────────────────────────────────────────────── #}
+      <div>
+        <label for="backend">Backend</label>
+        {% if capabilities.backends_installed %}
+          <select id="backend" name="backend" onchange="lmCheckCompat()">
+            {% for b in capabilities.backends_installed %}
+              <option value="{{ b.backend }}">{{ b.recipe_display }} · {{ b.backend_key }}{% if b.version %} ({{ b.version }}){% endif %}</option>
+            {% endfor %}
+          </select>
+          {% if capabilities.backends_installable %}
+            <div class="muted">
+              Not installed (need install first):
+              {% for b in capabilities.backends_installable %}
+                <code>{{ b.backend }}</code>{% if not loop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% elif capabilities.backends %}
+          {# Has installable but nothing installed yet #}
+          <select id="backend" name="backend" onchange="lmCheckCompat()">
+            {% for b in capabilities.backends %}
+              <option value="{{ b.backend }}" data-installed="{{ '1' if b.state == 'installed' else '0' }}" {% if b.state != 'installed' %}disabled{% endif %}>
+                {{ b.recipe_display }} · {{ b.backend_key }} ({{ b.state }})
+              </option>
+            {% endfor %}
+          </select>
+          <div class="muted">No backends installed yet — install one on the profile page first.</div>
+        {% else %}
+          <input type="text" id="backend" name="backend" required placeholder="llamacpp-vulkan" onchange="lmCheckCompat()">
+          <div class="muted">Instance offline — enter the backend manually.</div>
+        {% endif %}
+        <div id="compat_warn" style="display:none; color: var(--status-critical); margin-top: 0.4rem; font-weight: 600;"></div>
+      </div>
+      </div>
+
+      {# ── Router (auto-fills engine/backend/quant/class) ────────────── #}
+      <div id="router_fields" style="display:none; grid-column: 1 / -1;">
+        <label for="router_model">Router</label>
+        {% if routers %}
+          <select id="router_model" name="router_model">
+            {% for r in routers %}<option value="{{ r.id }}">{{ r.id }}</option>{% endfor %}
+          </select>
+        {% else %}
+          <input type="text" id="router_model" name="router_model" placeholder="e.g. my-collection-router">
+          <div class="muted">No routers detected on this profile -- enter the router's registered name manually.</div>
+        {% endif %}
+        <div class="muted">Route decisions are captured per trial in the trials sidecar; engine/backend/quantization/model class are fixed facts of a router, not choices.</div>
+      </div>
+
+      {# ── OS (fixed) ─────────────────────────────────────────────── #}
+      <div>
+        <label>OS</label>
+        {% if default_os %}
+          <div style="padding: 0.4rem 0;">{{ default_os }} <span class="muted">(fixed by this profile)</span></div>
+        {% else %}
+          <div class="empty" style="padding: 0.4rem 0;">Couldn't detect — see profile page to fix discovery.</div>
+        {% endif %}
+      </div>
+
+      {# ── Run options ────────────────────────────────────────────── #}
+      <div>
+        <label for="power_state">Power state</label>
+        <select id="power_state" name="power_state">
+          <option value="plugged">plugged</option>
+          <option value="battery">battery</option>
+          <option value="power_capped">power_capped</option>
+        </select>
+      </div>
+      <div><label for="power_cap_w">Power cap (W, optional)</label><input type="number" id="power_cap_w" name="power_cap_w"></div>
+      <div><label for="warmup_trials">Warmup trials</label><input type="number" id="warmup_trials" name="warmup_trials" value="2"></div>
+      <div><label for="measured_trials">Measured trials</label><input type="number" id="measured_trials" name="measured_trials" value="5"></div>
+      <div><label for="max_tokens">Max tokens</label><input type="number" id="max_tokens" name="max_tokens" value="256"></div>
+      <div><label for="energy_price_usd_per_kwh">Electricity price ($/kWh, optional)</label><input type="number" step="0.01" id="energy_price_usd_per_kwh" name="energy_price_usd_per_kwh"></div>
+      <div><label for="hardware_cost_usd">Hardware cost ($, optional)</label><input type="number" step="0.01" id="hardware_cost_usd" name="hardware_cost_usd"></div>
+      <div><label for="hardware_lifetime_hours">Hardware lifetime (hours, optional)</label><input type="number" step="1" id="hardware_lifetime_hours" name="hardware_lifetime_hours" placeholder="e.g. 26280 for 3 years"></div>
+      <div><label>&nbsp;</label><label><input type="checkbox" id="exclusive_run" name="exclusive_run" checked> Exclusive run (no competing workload)</label></div>
+      <div><label>&nbsp;</label><label><input type="checkbox" id="via_job_engine" name="via_job_engine" title="Execute as a single durable Lemonade job (POST /v1/jobs) instead of direct HTTP calls -- survives this dashboard restarting mid-run."> Execute via Lemonade's job engine</label></div>
+    </div>
+    <button class="btn" type="submit">Run sweep</button>
+  </form>
+</div>
+
+<script>
+  var LM_MODELS_BY_BASE = {{ models_by_base_json | safe }};
+  // {backend_str: [compatible_engine, ...]}  — empty list means "any engine ok / unknown"
+  var LM_COMPAT = {{ compat_map_json | safe }};
+
+  function lmOnBaseChange(select) {
+    var variants = LM_MODELS_BY_BASE[select.value] || [];
+    var quantSelect = document.getElementById("quantization");
+    if (!quantSelect) return;
+    quantSelect.innerHTML = "";
+    variants.forEach(function (v) {
+      var opt = document.createElement("option");
+      opt.value = v.quantization;
+      opt.dataset.modelId = v.id;
+      opt.dataset.context = v.context_length;
+      opt.textContent = (v.quantization || "(unknown)") + (v.size_gb ? " (" + v.size_gb.toFixed(1) + " GB)" : "");
+      quantSelect.appendChild(opt);
+    });
+    lmOnQuantChange(quantSelect);
+  }
+
+  function lmOnQuantChange(select) {
+    var opt = select.selectedOptions[0];
+    if (!opt) return;
+    var mn = document.getElementById("model_name");
+    if (mn) mn.value = opt.dataset.modelId;
+    var cl = document.getElementById("context_length");
+    if (cl) cl.value = opt.dataset.context;
+  }
+
+  function lmCheckCompat() {
+    var warn = document.getElementById("compat_warn");
+    if (!warn) return;
+    var engineEl = document.getElementById("compute_engine");
+    var backendEl = document.getElementById("backend");
+    if (!engineEl || !backendEl) { warn.style.display = "none"; return; }
+
+    // A free-text backend fallback (instance offline) can't be restricted to
+    // a fixed option list -- fall back to warning only, same as before.
+    if (backendEl.tagName !== "SELECT") {
+      var allowedFreeText = LM_COMPAT[backendEl.value];
+      if (allowedFreeText && allowedFreeText.length && allowedFreeText.indexOf(engineEl.value) === -1) {
+        warn.textContent = "\u26A0 " + engineEl.value + " cannot run " + backendEl.value + ". Compatible engines: " + allowedFreeText.join(", ") + ".";
+        warn.style.display = "block";
+      } else {
+        warn.style.display = "none";
+      }
+      return;
+    }
+
+    // Otherwise, don't just warn about an incompatible pair -- disable it so
+    // it can't be selected in the first place. An option already disabled
+    // for not being installed (data-installed="0") stays disabled regardless.
+    var engine = engineEl.value;
+    Array.from(backendEl.options).forEach(function (opt) {
+      if (opt.dataset.installed === "0") { opt.disabled = true; return; }
+      var allowed = LM_COMPAT[opt.value];
+      opt.disabled = !(!allowed || allowed.length === 0 || allowed.indexOf(engine) !== -1);
+    });
+    if (backendEl.selectedOptions[0] && backendEl.selectedOptions[0].disabled) {
+      var firstOk = Array.from(backendEl.options).find(function (o) { return !o.disabled; });
+      if (firstOk) backendEl.value = firstOk.value;
+    }
+
+    var allowedForBackend = LM_COMPAT[backendEl.value];
+    Array.from(engineEl.options).forEach(function (opt) {
+      opt.disabled = !(!allowedForBackend || allowedForBackend.length === 0 || allowedForBackend.indexOf(opt.value) !== -1);
+    });
+    if (engineEl.selectedOptions[0] && engineEl.selectedOptions[0].disabled) {
+      var firstOkEngine = Array.from(engineEl.options).find(function (o) { return !o.disabled; });
+      if (firstOkEngine) engineEl.value = firstOkEngine.value;
+    }
+
+    var stillBad = backendEl.selectedOptions[0] && backendEl.selectedOptions[0].disabled;
+    if (stillBad) {
+      warn.textContent = "\u26A0 No backend on this profile is compatible with " + engine + ".";
+      warn.style.display = "block";
+    } else {
+      warn.style.display = "none";
+    }
+  }
+
+  // Run on page load to catch any pre-selected incompatible pair.
+  lmCheckCompat();
+
+  function lmToggleRunType() {
+    var isRouter = document.getElementById("run_type_router").checked;
+    document.getElementById("model_fields").style.display = isRouter ? "none" : "contents";
+    document.getElementById("router_fields").style.display = isRouter ? "block" : "none";
+    var jobEngine = document.getElementById("via_job_engine");
+    if (jobEngine) {
+      jobEngine.disabled = isRouter;
+      if (isRouter) jobEngine.checked = false;
+    }
+  }
+</script>
+{% endblock %}
