@@ -73,6 +73,16 @@ price, `--cost-baseline MODEL` picks the comparison model, and
 `--prompts-file` takes your own prompts (one per line, or JSONL). The baseline
 is priced on the same token counts, so it is an estimate.
 
+## Submitting results
+
+`lemonmatrix submit results/my-machine/<run_id>.json` opens a pull request
+that adds the file to the public leaderboard
+([LemonMatrix/lemonmatrix.github.io](https://github.com/LemonMatrix/lemonmatrix.github.io)).
+It validates the file against the same schemas the leaderboard's CI uses, forks
+the repo (or reuses your fork), keeps the file's `results/<profile>/...` path,
+pushes and opens the PR with the GitHub CLI. `--dry-run` shows the PR without
+touching GitHub.
+
 ## Importing other tools' results
 
 `lemonmatrix import FILE...` reads results from

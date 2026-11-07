@@ -30,6 +30,7 @@ from .results_store import (list_audiogen_results, list_classify_results, list_e
                              save_meshgen_result, save_rerank_result, save_stt_result, save_trials,
                              save_tts_result)
 from .routing_cost import parse_cost_override
+from .submit import DEFAULT_SITE_REPO, SubmitError, plan, pr_text, submit
 from .validate import (validate_audiogen_result, validate_classify_result, validate_embeddings_result,
                         validate_imagegen_result, validate_imported_result, validate_meshgen_result,
                         validate_rerank_result, validate_result, validate_stt_result, validate_tts_result)
@@ -1877,6 +1878,12 @@ _SUBMISSION_MODALITY_VALIDATORS = {
 _SUBMISSION_SKIP_DIRS = {"failures", "trials"}
 
 
+def _validator_for(path: Path):
+    if path.parent.parent.name == "imported":
+        return validate_imported_result
+    return _SUBMISSION_MODALITY_VALIDATORS.get(path.parent.name, validate_result)
+
+
 @cli.command("validate-submission")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, dir_okay=False))
 @click.option("--results-dir", type=click.Path(file_okay=False), default="results", show_default=True,
@@ -1925,12 +1932,8 @@ def validate_submission(paths: tuple[str, ...], results_dir: str) -> None:
             failures.append((path, f"couldn't read/parse: {exc}"))
             continue
 
-        if path.parent.parent.name == "imported":
-            validator = validate_imported_result
-        else:
-            validator = _SUBMISSION_MODALITY_VALIDATORS.get(path.parent.name, validate_result)
         try:
-            validator(data)
+            _validator_for(path)(data)
         except jsonschema.ValidationError as exc:
             failures.append((path, str(exc)))
             continue
@@ -2032,6 +2035,48 @@ def imported_results(results_dir: str) -> None:
             )
         for warning in doc["validity"].get("warnings", []):
             click.secho(f"  warning: {warning}", fg="yellow")
+
+
+@cli.command("submit")
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--results-dir", type=click.Path(file_okay=False), default="results", show_default=True,
+              help="Where the files live locally; their layout under it is kept in the site repo.")
+@click.option("--repo", default=DEFAULT_SITE_REPO, show_default=True, help="Leaderboard repo to open the PR against.")
+@click.option("--dry-run", is_flag=True, default=False, help="Validate and show the PR without touching GitHub.")
+def submit_results(paths: tuple[str, ...], results_dir: str, repo: str, dry_run: bool) -> None:
+    """Open a PR that adds result files to the public leaderboard.
+
+    Validates each file against the same schemas the leaderboard's CI uses,
+    then forks the repo (or reuses your fork), branches from its main, copies
+    the files to the same results/<profile>/... paths, pushes and opens the
+    PR. Needs git and the GitHub CLI (gh) logged in.
+
+    \b
+      lemonmatrix submit results/my-machine/<run_id>.json --dry-run
+      lemonmatrix submit results/my-machine/*.json
+    """
+    def validate(path: Path, data: dict) -> None:
+        try:
+            _validator_for(path)(data)
+        except jsonschema.ValidationError as exc:
+            raise click.ClickException(f"{path} fails schema validation: {exc.message}") from exc
+
+    try:
+        submissions = plan([Path(p) for p in paths], Path(results_dir), validate)
+    except SubmitError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    title, body = pr_text(submissions)
+    click.secho(f"PR to {repo}: {title}", bold=True)
+    click.echo(body)
+    if dry_run:
+        click.echo("Dry run: nothing was pushed.")
+        return
+    try:
+        url = submit(submissions, repo)
+    except SubmitError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.secho(f"Opened {url}", fg="green")
 
 
 @cli.command("trials")
