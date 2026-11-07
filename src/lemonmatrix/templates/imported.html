@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Imported results{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Imported results</h2>
+  <p class="muted">
+    Results from other Lemonade benchmark tools, added with <code>lemonmatrix import</code>.
+    They did not go through LemonMatrix's validity checks, so they are listed here and never ranked on the leaderboard.
+  </p>
+  {% if not docs %}<p>Nothing imported yet.</p>{% endif %}
+</div>
+
+{% for doc in docs %}
+<div class="card">
+  <h2>{{ doc.environment.cpu or "Unknown machine" }}</h2>
+  <p class="muted">
+    {{ doc.source.tool }}{% if doc.source.submitted_by %} &middot; by {{ doc.source.submitted_by }}{% endif %}
+    &middot; measured {{ doc.measured_at[:19].replace("T", " ") if doc.measured_at else "–" }}
+    {% if doc.environment.gpu %} &middot; {{ doc.environment.gpu }}{% endif %}
+    {% if doc.environment.npu %} &middot; {{ doc.environment.npu }}{% endif %}
+    {% if doc.environment.os %} &middot; {{ doc.environment.os }}{% endif %}
+    {% if doc.environment.lemonade_version %} &middot; Lemonade {{ doc.environment.lemonade_version }}{% endif %}
+  </p>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Workload</th><th>Model</th><th>Scenario</th><th>Engine</th><th>Backend</th><th>Value</th><th>TTFT ms</th><th>J/token</th></tr>
+      </thead>
+      <tbody>
+        {% for row in doc.rows %}
+          <tr>
+            <td>{{ row.workload }}</td>
+            <td>{{ row.model }}</td>
+            <td>{{ row.scenario or "–" }}</td>
+            <td>{% if row.compute_engine %}<span class="chip {{ row.compute_engine }}">{{ row.compute_engine }}</span>{% else %}–{% endif %}</td>
+            <td>{{ row.backend }}</td>
+            <td>{{ "%.2f"|format(row.value) }} {{ row.unit }}</td>
+            <td>{{ "%.0f"|format(row.ttft_ms) if row.ttft_ms is defined else "–" }}</td>
+            <td>{{ "%.3f"|format(row.joules_per_token) if row.joules_per_token is defined else "–" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% for warning in doc.validity.warnings or [] %}
+    <p class="flash warning">{{ warning }}</p>
+  {% endfor %}
+  <p class="muted">{{ doc.validity.notes }}</p>
+</div>
+{% endfor %}
+{% endblock %}

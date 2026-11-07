@@ -35,7 +35,7 @@ from .discover import QUICK_SELECT_PORTS, expand_subnet, scan, scan_localhost
 from .profile import DEFAULT_PORT, Profile, build_url, connect_and_save
 from .results_store import (get_path, list_audiogen_results, list_classify_results,
                              list_embeddings_results, list_failures, list_imagegen_results,
-                             list_meshgen_results, list_rerank_results, list_results, list_stt_results,
+                             list_imported_results, list_meshgen_results, list_rerank_results, list_results, list_stt_results,
                              list_tts_results, load_result, load_trials, results_to_csv,
                              save_audiogen_result, save_classify_result, save_embeddings_result,
                              save_failure, save_imagegen_result, save_meshgen_result, save_rerank_result,
@@ -1787,6 +1787,10 @@ def create_app(results_dir: str | Path = "results") -> Flask:
         if batch is None or batch.profile_name != name:
             abort(404)
         return render_template("sweep_status.html", profile_name=name, batch=batch)
+
+    @app.route("/imported")
+    def imported():
+        return render_template("imported.html", docs=list_imported_results(app.config["RESULTS_DIR"]))
 
     @app.route("/results/<profile>/<run_id>")
     def result_detail(profile: str, run_id: str):

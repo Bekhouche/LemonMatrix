@@ -12,6 +12,7 @@
     <nav>
       <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' else '' }}">Leaderboard</a>
       <a href="{{ url_for('profiles') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('profile') else '' }}">Profiles</a>
+      <a href="{{ url_for('imported') }}" class="{{ 'active' if request.endpoint == 'imported' else '' }}">Imported</a>
     </nav>
   </div>
   <main>

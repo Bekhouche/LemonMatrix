@@ -1515,3 +1515,67 @@ def test_profiles_page_shows_gpu_column_preferring_dgpu_over_igpu(client):
     # column, since that's the more relevant accelerator for benchmarking.
     assert b"NVIDIA RTX 4090" in resp.data
     assert b"AMD Radeon 8060S" not in resp.data
+
+
+def test_result_detail_shows_the_routing_breakdown(client):
+    test_client, _, tmp_path = client
+    _write_result(tmp_path, "demo", "router-run", valid=True, model_name="user.Router")
+    path = tmp_path / "results" / "demo" / "router-run.json"
+    result = json.loads(path.read_text())
+    result["metrics"]["routing"] = {
+        "requests": 4, "prompt_set_size": 2, "local_share": 1.0, "free_share": 0.5,
+        "routed_cost_usd": 0.001, "unpriced_requests": 0, "baseline_model": "cloud.big",
+        "baseline_cost_usd": 0.002, "savings_usd": 0.001, "savings_pct": 50.0,
+        "candidates": {
+            "local.small": {"requests": 2, "share": 0.5, "prompt_tokens": 20, "output_tokens": 40,
+                            "cost_usd": 0.0, "price_source": "local_default"},
+            "cloud.big": {"requests": 2, "share": 0.5, "prompt_tokens": 30, "output_tokens": 40,
+                          "cost_usd": 0.001, "price_source": "server"},
+        },
+    }
+    path.write_text(json.dumps(result))
+
+    resp = test_client.get("/results/demo/router-run")
+
+    assert resp.status_code == 200
+    assert b"Routing" in resp.data
+    assert b"saved 50.0%" in resp.data
+    assert b"local default" in resp.data
+
+
+def test_result_detail_without_routing_has_no_routing_card(client):
+    test_client, _, tmp_path = client
+    _write_result(tmp_path, "demo", "plain-run", valid=True)
+
+    resp = test_client.get("/results/demo/plain-run")
+
+    assert b"<h2>Routing</h2>" not in resp.data
+
+
+def test_imported_page_lists_rows_and_warnings(client):
+    from lemonmatrix.importers import import_result
+    from lemonmatrix.results_store import save_imported_result
+
+    test_client, _, tmp_path = client
+    data = {
+        "system": {"cpu": "Ryzen AI Test CPU"},
+        "results": {"image_gen": {"SD-Turbo": {
+            "cpu": {"value": 6.04, "unit": "img/min"},
+            "vulkan": {"value": 6.05, "unit": "img/min"},
+        }}},
+    }
+    save_imported_result(tmp_path / "results", import_result(data, json.dumps(data).encode()))
+
+    resp = test_client.get("/imported")
+
+    assert resp.status_code == 200
+    assert b"Ryzen AI Test CPU" in resp.data
+    assert b"6.05 img/min" in resp.data
+    assert b"backend switch may not have taken effect" in resp.data
+
+
+def test_imported_page_renders_empty(client):
+    test_client, _, _ = client
+    resp = test_client.get("/imported")
+    assert resp.status_code == 200
+    assert b"Nothing imported yet" in resp.data

@@ -92,6 +92,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
   border: 1px solid var(--border);
 }
 .flash.error { color: var(--status-critical); }
+.flash.warning { color: var(--status-critical); }
 .flash.ok { color: var(--status-good); }
 
 .stat-row { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }

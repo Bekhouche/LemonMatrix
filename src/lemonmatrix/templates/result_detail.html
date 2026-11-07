@@ -27,6 +27,46 @@
   {% endif %}
 </div>
 
+{% set routing = result.metrics.routing %}
+{% if routing %}
+<div class="card">
+  <h2>Routing</h2>
+  <p class="muted">
+    {{ routing.requests }} request(s){% if routing.prompt_set_size %} from a {{ routing.prompt_set_size }}-prompt set{% endif %}
+    &middot; {{ "%.0f"|format(routing.local_share * 100) }}% local
+    &middot; {{ "%.0f"|format(routing.free_share * 100) }}% free
+    &middot; cost ${{ "%.6f"|format(routing.routed_cost_usd) }}
+    {% if routing.baseline_cost_usd is defined %}
+      vs ${{ "%.6f"|format(routing.baseline_cost_usd) }} all on {{ routing.baseline_model }}
+      {% if routing.savings_pct is defined %}(saved {{ "%.1f"|format(routing.savings_pct) }}%){% endif %}
+    {% endif %}
+  </p>
+  {% if routing.unpriced_requests %}
+    <p class="muted">{{ routing.unpriced_requests }} request(s) went to a candidate with no known price, so no savings figure is given.</p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Candidate</th><th>Requests</th><th>Share</th><th>Prompt tokens</th><th>Output tokens</th><th>Cost USD</th><th>Price from</th></tr>
+      </thead>
+      <tbody>
+        {% for name, c in routing.candidates.items() %}
+          <tr>
+            <td>{{ name }}</td>
+            <td>{{ c.requests }}</td>
+            <td>{{ "%.0f"|format(c.share * 100) }}%</td>
+            <td>{{ c.prompt_tokens }}</td>
+            <td>{{ c.output_tokens }}</td>
+            <td>{{ "%.6f"|format(c.cost_usd) if c.cost_usd is not none else "–" }}</td>
+            <td class="muted">{{ c.price_source.replace("_", " ") }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Raw result</h2>
   <pre class="json">{{ result_json }}</pre>
