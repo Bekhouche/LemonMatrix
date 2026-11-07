@@ -2,7 +2,9 @@
 instance (Ubuntu 22.04, 7x NVIDIA L4, no AMD hardware) -- see
 test_profile_real_shape.py for the matching discovery-side fixture."""
 
-from lemonmatrix.capabilities import available_backends, available_compute_engines
+import pytest
+
+from lemonmatrix.capabilities import available_backends, available_compute_engines, parse_quantization
 
 SYSTEM_INFO = {
     "devices": {
@@ -150,3 +152,38 @@ def test_new_recipes_work_with_zero_recipe_specific_code():
     # cpu can't run a rocm backend -- still correctly rejected for a recipe
     # validate_combo_against_profile has never heard of by name.
     assert validate_combo_against_profile("cpu", "vllm-rocm", system_info, environment) != []
+
+
+@pytest.mark.parametrize(
+    "model_id, checkpoint",
+    [
+        ("Llama-3.2-1B-FLM", "llama3.2:1b"),
+        ("Qwen3-0.6B-FLM", "qwen3:0.6b"),
+        ("gpt-oss-20b-FLM", "gpt-oss:20b"),
+        ("Qwen3-8B-Thinking-FLM", "qwen3:8b-thinking"),
+    ],
+)
+def test_parse_quantization_ignores_flm_size_tags(model_id, checkpoint):
+    assert parse_quantization(model_id, checkpoint) == ""
+
+
+@pytest.mark.parametrize(
+    "checkpoint, expected",
+    [
+        ("LiquidAI/LFM2-1.2B-GGUF:LFM2-1.2B-Q4_K_M.gguf", "Q4_K_M"),
+        ("org/repo:model-iq4_xs.gguf", "iq4_xs"),
+        ("org/repo:model.BF16.gguf", "BF16"),
+        ("org/repo:model.gguf", ""),
+    ],
+)
+def test_parse_quantization_reads_the_quant_out_of_a_gguf_file_name(checkpoint, expected):
+    assert parse_quantization("Some-Model-GGUF", checkpoint) == expected
+
+
+def test_parse_quantization_keeps_plain_and_custom_variants():
+    assert parse_quantization("M", "unsloth/Qwen3-0.6B-GGUF:Q4_0") == "Q4_0"
+    assert parse_quantization("M", "unsloth/Model-GGUF:UD-Q4_K_XL") == "UD-Q4_K_XL"
+
+
+def test_parse_quantization_returns_nothing_for_onnx_npu_checkpoints():
+    assert parse_quantization("AMD-OLMo-1B-SFT-DPO-Hybrid", "amd/AMD-OLMo-1B-SFT-DPO-onnx-ryzenai-1.7-hybrid") == ""

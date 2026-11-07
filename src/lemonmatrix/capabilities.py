@@ -20,6 +20,10 @@ import re
 from .backend_version import resolve_backend
 from .profile import is_integrated_gpu
 
+# FastFlowLM checkpoints are Ollama-style tags ("llama3.2:1b", "qwen3:0.6b"),
+# where the ":VARIANT" part is the parameter count, not a quantization.
+_SIZE_TAG = re.compile(r"^\d+(?:\.\d+)?[bm](?:[-_].*)?$", re.IGNORECASE)
+
 
 def parse_quantization(model_id: str, checkpoint: str) -> str:
     """Best-effort quantization string for a model Lemonade already knows
@@ -37,6 +41,11 @@ def parse_quantization(model_id: str, checkpoint: str) -> str:
     string implies. Returns "" if nothing could be parsed.
     """
     quant = checkpoint.rsplit(":", 1)[-1] if ":" in checkpoint else ""
+    if quant.lower().endswith(".gguf"):
+        match = re.search(r"[-_.]((?:I?Q\d|F16|F32|BF16)[A-Za-z0-9_]*)\.gguf$", quant, re.IGNORECASE)
+        quant = match.group(1) if match else ""
+    elif _SIZE_TAG.match(quant):
+        quant = ""
     if not quant:
         match = re.search(r"-((?:Q\d|IQ\d|F16|F32|BF16)[A-Za-z0-9_]*)$", model_id)
         quant = match.group(1) if match else ""
