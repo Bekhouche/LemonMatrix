@@ -49,6 +49,10 @@ def _router_cost_options(func):
         click.option("--cost-baseline", default=None,
                      help="Router runs: the model every request is priced against for savings "
                           "(default: the most expensive priced candidate)."),
+        click.option("--measure-baseline/--estimate-baseline", default=True, show_default=True,
+                     help="Router runs: after the trials, send each prompt the router served elsewhere "
+                          "once to the baseline model and price the baseline on its own token counts. "
+                          "--estimate-baseline reuses the routed model's counts and sends nothing extra."),
     ]
     for option in reversed(options):
         func = option(func)
@@ -88,7 +92,8 @@ def _echo_routing(result: dict) -> None:
     click.echo(f"  routing: {split}   local {routing['local_share']:.0%}   free {routing['free_share']:.0%}")
     line = f"  cost: ${routing['routed_cost_usd']:.6f}"
     if "baseline_cost_usd" in routing:
-        line += f" vs ${routing['baseline_cost_usd']:.6f} all-{routing['baseline_model']}"
+        method = routing.get("baseline_method", "estimated")
+        line += f" vs ${routing['baseline_cost_usd']:.6f} all-{routing['baseline_model']} ({method})"
         if "savings_pct" in routing:
             line += f" (saved {routing['savings_pct']:.1f}%)"
     if routing["unpriced_requests"]:
@@ -468,6 +473,7 @@ def run(
     prompts_file: str | None,
     costs: tuple[str, ...],
     cost_baseline: str | None,
+    measure_baseline: bool,
 ) -> None:
     """Run one benchmark against a saved profile and write a result JSON.
 
@@ -576,6 +582,7 @@ def run(
         prompts=prompts,
         cost_overrides=cost_overrides,
         cost_baseline_model=cost_baseline,
+        measure_baseline=measure_baseline,
     )
     if prompt_file:
         cfg.prompt = Path(prompt_file).read_text()
@@ -1680,6 +1687,7 @@ def sweep(
     prompts_file: str | None,
     costs: tuple[str, ...],
     cost_baseline: str | None,
+    measure_baseline: bool,
 ) -> None:
     """Run a Cartesian matrix sweep against a saved profile.
 
@@ -1840,6 +1848,7 @@ def sweep(
             prompts=prompts,
             cost_overrides=cost_overrides,
             cost_baseline_model=cost_baseline,
+            measure_baseline=measure_baseline,
         )
         try:
             if via_job_engine:

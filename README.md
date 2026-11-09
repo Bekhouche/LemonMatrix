@@ -70,8 +70,14 @@ per million tokens. They come from Lemonade's own `estimated_cost` when the
 candidate carries cost metadata (cloud models get it from their provider), and
 non-cloud candidates count as free. `--cost MODEL=IN,OUT` sets or overrides a
 price, `--cost-baseline MODEL` picks the comparison model, and
-`--prompts-file` takes your own prompts (one per line, or JSONL). The baseline
-is priced on the same token counts, so it is an estimate.
+`--prompts-file` takes your own prompts (one per line, or JSONL).
+
+After the trials, each prompt the router sent elsewhere goes once to the
+baseline model, and the baseline is priced on the tokens that model actually
+wrote. This matters for reasoning models, which can write ten times the tokens
+of a small local model for the same prompt. The extra requests run outside the
+measured window; `--estimate-baseline` skips them and reuses the routed
+model's token counts, and the result's `baseline_method` says which was used.
 
 ## Submitting results
 

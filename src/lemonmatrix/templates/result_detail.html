@@ -37,7 +37,7 @@
     &middot; {{ "%.0f"|format(routing.free_share * 100) }}% free
     &middot; cost ${{ "%.6f"|format(routing.routed_cost_usd) }}
     {% if routing.baseline_cost_usd is defined %}
-      vs ${{ "%.6f"|format(routing.baseline_cost_usd) }} all on {{ routing.baseline_model }}
+      vs ${{ "%.6f"|format(routing.baseline_cost_usd) }} all on {{ routing.baseline_model }} ({{ routing.baseline_method or "estimated" }} baseline)
       {% if routing.savings_pct is defined %}(saved {{ "%.1f"|format(routing.savings_pct) }}%){% endif %}
     {% endif %}
   </p>

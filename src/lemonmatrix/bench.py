@@ -28,6 +28,8 @@ import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
+import requests
+
 from .backend_version import lookup_backend_version, resolve_backend
 from .capabilities import engine_backend_compatible, parse_quantization
 from .client import LemonadeClient
@@ -79,6 +81,9 @@ class SweepConfig:
     # USD per million input/output tokens per candidate: {model: {"input", "output"}}.
     cost_overrides: dict[str, dict] | None = None
     cost_baseline_model: str | None = None
+    # Send each prompt the router served elsewhere once to the baseline model,
+    # after the measured trials, so the baseline is priced on its own tokens.
+    measure_baseline: bool = True
 
 
 def _ttft_ms(stats: dict) -> float:
@@ -427,11 +432,51 @@ def run_sweep(
                 trial["prompt_index"] = i % len(cfg.prompts)
             raw_trials.append(trial)
 
+    baseline_tokens = None
+    if is_router and cfg.measure_baseline:
+        baseline_tokens = _measure_baseline(client, cfg, raw_trials, candidate_recipes)
+
     return _aggregate_sweep_result(
         client, environment, cfg, raw_trials, exclusivity, system_info,
         engine_ok, engine_reason, backend_unresolved_note, is_router,
-        candidate_recipes=candidate_recipes,
+        candidate_recipes=candidate_recipes, baseline_tokens=baseline_tokens,
     )
+
+
+def _measure_baseline(
+    client: LemonadeClient, cfg: SweepConfig, raw_trials: list[dict], candidate_recipes: dict[str, str]
+) -> dict[int, tuple[int, int]]:
+    """Token counts the baseline model produces for each prompt it did not serve.
+
+    Runs outside the exclusivity window, so it never touches the measured
+    trials. A prompt whose request fails is left out and priced as an estimate;
+    the result's ``baseline_estimated_requests`` counts those.
+    """
+    summary = summarize_routing(
+        raw_trials, candidate_recipes, overrides=cfg.cost_overrides, baseline_model=cfg.cost_baseline_model
+    )
+    baseline = (summary or {}).get("baseline_model")
+    if not baseline or "baseline_cost_usd" not in summary:
+        return {}
+    indexes = sorted({t.get("prompt_index", 0) for t in raw_trials if t.get("route_to") not in (None, baseline)})
+    measured: dict[int, tuple[int, int]] = {}
+    for index in indexes:
+        prompt = cfg.prompts[index] if cfg.prompts else cfg.prompt
+        try:
+            response = client.chat_completion(
+                model=baseline, messages=[{"role": "user", "content": prompt}], max_tokens=cfg.max_tokens
+            )
+        except requests.RequestException:
+            continue
+        usage = response.get("usage") or {}
+        if "completion_tokens" not in usage:
+            stats = client.stats()
+            usage = {
+                "prompt_tokens": stats.get("prompt_tokens") or stats.get("input_tokens") or 0,
+                "completion_tokens": stats.get("output_tokens", 0),
+            }
+        measured[index] = (int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
+    return measured
 
 
 def _trial_cfg(cfg: SweepConfig, index: int) -> SweepConfig:
@@ -452,6 +497,7 @@ def _aggregate_sweep_result(
     backend_unresolved_note: str | None,
     is_router: bool,
     candidate_recipes: dict[str, str] | None = None,
+    baseline_tokens: dict[int, tuple[int, int]] | None = None,
 ) -> tuple[dict, list[dict]]:
     """Turns raw_trials (in _run_one()'s dict shape: ttft_ms,
     decode_tokens_per_sec, prompt_tokens, output_tokens, watts, vram_gb,
@@ -547,6 +593,7 @@ def _aggregate_sweep_result(
             overrides=cfg.cost_overrides,
             baseline_model=cfg.cost_baseline_model,
             prompt_set_size=len(cfg.prompts) if cfg.prompts else None,
+            baseline_tokens=baseline_tokens,
         )
         if routing:
             metrics["routing"] = routing

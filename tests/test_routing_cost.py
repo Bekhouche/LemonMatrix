@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import requests
 from click.testing import CliRunner
 from conftest import FAKE_ROUTER_MODEL_ID
 
@@ -238,6 +239,64 @@ def test_router_run_reports_a_schema_valid_routing_block(fake_lemonade, monkeypa
     assert routing["candidates"][CLOUD]["requests"] == 2
     assert routing["baseline_model"] == CLOUD
     assert routing["savings_pct"] == pytest.approx(50.0)
+
+
+def _baseline_calls(monkeypatch, output_tokens=2000, fail=False):
+    calls = []
+    original = LemonadeClient.chat_completion
+
+    def chat_completion(self, model, messages, max_tokens, **kwargs):
+        if model != CLOUD:
+            return original(self, model, messages, max_tokens, **kwargs)
+        calls.append(messages[0]["content"])
+        if fail:
+            raise requests.ConnectionError("down")
+        return {"choices": [], "usage": {"prompt_tokens": 40, "completion_tokens": output_tokens}}
+
+    monkeypatch.setattr(LemonadeClient, "chat_completion", chat_completion)
+    return calls
+
+
+def test_router_run_measures_the_baseline_once_per_prompt_it_did_not_serve(fake_lemonade, monkeypatch):
+    _route_by_prompt(monkeypatch)
+    calls = _baseline_calls(monkeypatch)
+    client = LemonadeClient(fake_lemonade)
+    environment, _ = discover_environment(client)
+
+    result, _ = run_sweep(client, environment, _router_cfg(prompts=["chat", "code"]))
+
+    validate_result(result)
+    routing = result["metrics"]["routing"]
+    measured = (40 * 0.6 + 2000 * 2.5) / 1_000_000
+    served = (40 * 0.6 + 256 * 2.5) / 1_000_000
+    assert calls == ["chat"]
+    assert routing["baseline_method"] == "measured"
+    assert routing["baseline_cost_usd"] == pytest.approx(2 * measured + 2 * served)
+
+
+def test_router_run_can_skip_the_baseline_measurement(fake_lemonade, monkeypatch):
+    _route_by_prompt(monkeypatch)
+    calls = _baseline_calls(monkeypatch)
+    client = LemonadeClient(fake_lemonade)
+    environment, _ = discover_environment(client)
+
+    result, _ = run_sweep(client, environment, _router_cfg(prompts=["chat", "code"], measure_baseline=False))
+
+    assert calls == []
+    assert result["metrics"]["routing"]["baseline_method"] == "estimated"
+
+
+def test_router_run_falls_back_to_an_estimate_when_the_baseline_fails(fake_lemonade, monkeypatch):
+    _route_by_prompt(monkeypatch)
+    _baseline_calls(monkeypatch, fail=True)
+    client = LemonadeClient(fake_lemonade)
+    environment, _ = discover_environment(client)
+
+    result, _ = run_sweep(client, environment, _router_cfg(prompts=["chat", "code"]))
+
+    validate_result(result)
+    assert result["metrics"]["routing"]["baseline_method"] == "estimated"
+    assert result["metrics"]["routing"]["savings_pct"] == pytest.approx(50.0)
 
 
 def test_router_run_hashes_the_whole_prompt_set(fake_lemonade):
