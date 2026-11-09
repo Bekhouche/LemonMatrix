@@ -113,6 +113,50 @@ def test_summarize_routing_keeps_an_explicit_baseline_without_a_price():
     assert "baseline_cost_usd" not in summary
 
 
+def test_summarize_routing_prices_the_baseline_on_measured_tokens():
+    trials = [
+        {**_trial(LOCAL), "prompt_index": 0},
+        {**_trial(LOCAL), "prompt_index": 1},
+        {**_trial(CLOUD, estimated_cost=CLOUD_PRICE), "prompt_index": 2},
+    ]
+    summary = summarize_routing(trials, RECIPES, baseline_tokens={0: (100, 2000), 1: (100, 1000)})
+
+    def cloud(prompt_tokens, output_tokens):
+        return (prompt_tokens * 0.6 + output_tokens * 2.5) / 1_000_000
+
+    assert summary["baseline_method"] == "measured"
+    assert summary["baseline_estimated_requests"] == 0
+    assert summary["baseline_cost_usd"] == pytest.approx(cloud(100, 2000) + cloud(100, 1000) + cloud(100, 200))
+
+
+def test_summarize_routing_keeps_the_baseline_models_own_tokens():
+    trials = [{**_trial(CLOUD, estimated_cost=CLOUD_PRICE), "prompt_index": 0}]
+    summary = summarize_routing(trials, RECIPES, baseline_tokens={0: (1, 99999)})
+
+    assert summary["baseline_cost_usd"] == pytest.approx(summary["routed_cost_usd"])
+    assert summary["baseline_method"] == "measured"
+
+
+def test_summarize_routing_reports_a_partly_measured_baseline():
+    trials = [
+        {**_trial(LOCAL), "prompt_index": 0},
+        {**_trial(LOCAL), "prompt_index": 1},
+        {**_trial(CLOUD, estimated_cost=CLOUD_PRICE), "prompt_index": 2},
+    ]
+    summary = summarize_routing(trials, RECIPES, baseline_tokens={0: (100, 2000)})
+
+    assert summary["baseline_method"] == "partial"
+    assert summary["baseline_estimated_requests"] == 1
+
+
+def test_summarize_routing_without_measurements_is_an_estimate():
+    trials = [_trial(LOCAL), _trial(CLOUD, estimated_cost=CLOUD_PRICE)]
+    summary = summarize_routing(trials, RECIPES)
+
+    assert summary["baseline_method"] == "estimated"
+    assert summary["baseline_estimated_requests"] == 1
+
+
 def test_summarize_routing_returns_none_without_route_decisions():
     assert summarize_routing([{"prompt_tokens": 1, "output_tokens": 1}], RECIPES) is None
 

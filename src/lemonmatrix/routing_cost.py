@@ -16,8 +16,12 @@ Prices are USD per million tokens, resolved per request in this order:
    per-token bill.
 
 A cloud candidate with no price is counted as unpriced rather than guessed.
-The baseline is priced on the same token counts the routed run produced, so it
-is an estimate: a different model would not write the same number of tokens.
+
+A request the baseline model did not serve is priced at the token counts the
+baseline model produced for that prompt when they were measured, and at the
+routed model's counts otherwise. Reasoning models can write ten times the
+tokens of a small local model for the same prompt, so the measured figure is
+the one to trust; ``baseline_method`` says which one a result used.
 """
 
 from __future__ import annotations
@@ -78,10 +82,13 @@ def summarize_routing(
     overrides: dict[str, dict] | None = None,
     baseline_model: str | None = None,
     prompt_set_size: int | None = None,
+    baseline_tokens: dict[int, tuple[int, int]] | None = None,
 ) -> dict | None:
     """Summarize routed trials into the result's ``metrics.routing`` block.
 
-    Returns None when no trial carries a routing decision.
+    ``baseline_tokens`` maps a prompt index to the (prompt, output) token counts
+    the baseline model produced for that prompt. Returns None when no trial
+    carries a routing decision.
     """
     overrides = overrides or {}
     routed = [t for t in trials if t.get("route_to")]
@@ -145,10 +152,26 @@ def summarize_routing(
     if baseline_model:
         summary["baseline_model"] = baseline_model
     if baseline_price is not None and unpriced == 0:
-        baseline_cost = sum(
-            _request_cost(baseline_price, int(t.get("prompt_tokens") or 0), int(t.get("output_tokens") or 0))
-            for t in routed
-        )
+        baseline_tokens = baseline_tokens or {}
+        baseline_cost = 0.0
+        estimated = 0
+        for trial in routed:
+            tokens = (int(trial.get("prompt_tokens") or 0), int(trial.get("output_tokens") or 0))
+            if trial["route_to"] != baseline_model:
+                measured = baseline_tokens.get(trial.get("prompt_index", 0))
+                if measured is None:
+                    estimated += 1
+                else:
+                    tokens = measured
+            baseline_cost += _request_cost(baseline_price, *tokens)
+        others = sum(1 for t in routed if t["route_to"] != baseline_model)
+        if estimated == 0:
+            summary["baseline_method"] = "measured"
+        elif estimated == others:
+            summary["baseline_method"] = "estimated"
+        else:
+            summary["baseline_method"] = "partial"
+        summary["baseline_estimated_requests"] = estimated
         summary["baseline_cost_usd"] = baseline_cost
         summary["savings_usd"] = baseline_cost - total_cost
         if baseline_cost > 0:

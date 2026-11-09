@@ -174,7 +174,9 @@
             "routed_cost_usd": { "type": "number", "minimum": 0, "description": "Cost of the priced requests." },
             "unpriced_requests": { "type": "integer", "minimum": 0 },
             "baseline_model": { "type": "string" },
-            "baseline_cost_usd": { "type": "number", "minimum": 0, "description": "Estimated cost of sending every request to baseline_model, at the same token counts." },
+            "baseline_cost_usd": { "type": "number", "minimum": 0, "description": "Cost of sending every request to baseline_model. Requests it did not serve are priced at the tokens it produced for the same prompt when measured, else at the routed model's tokens (see baseline_method)." },
+            "baseline_method": { "enum": ["measured", "partial", "estimated"], "description": "measured: every request the baseline did not serve was priced on the baseline's own measured tokens. estimated: none were (older results have no field and are estimated). partial: some measurements failed." },
+            "baseline_estimated_requests": { "type": "integer", "minimum": 0, "description": "Requests priced at the routed model's tokens because no baseline measurement exists for their prompt." },
             "savings_usd": { "type": "number" },
             "savings_pct": { "type": "number" }
           }
