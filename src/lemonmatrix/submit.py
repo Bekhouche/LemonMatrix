@@ -113,9 +113,9 @@ def submit(submissions: list[Submission], repo: str = DEFAULT_SITE_REPO, runner=
     try:
         clone = workdir / "site"
         runner(["gh", "repo", "clone", fork, str(clone), "--", "--depth", "1"])
-        runner(["git", "remote", "add", "upstream", f"https://github.com/{repo}.git"], cwd=clone)
-        runner(["git", "fetch", "--depth", "1", "upstream", "main"], cwd=clone)
-        runner(["git", "switch", "-c", branch, "upstream/main"], cwd=clone)
+        # gh adds an "upstream" remote when it clones a fork, so fetch by URL instead.
+        runner(["git", "fetch", "--depth", "1", f"https://github.com/{repo}.git", "main"], cwd=clone)
+        runner(["git", "switch", "-c", branch, "FETCH_HEAD"], cwd=clone)
         for s in submissions:
             target = clone / s.target
             target.parent.mkdir(parents=True, exist_ok=True)

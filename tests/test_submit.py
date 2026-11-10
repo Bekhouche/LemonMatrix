@@ -128,8 +128,11 @@ def test_submit_branches_from_upstream_main(tmp_path):
 
     submit(_subs(tmp_path), "owner/site", runner=gh)
 
+    fetch = next(c for c in gh.calls if c[:2] == ["git", "fetch"])
+    assert fetch[-2:] == ["https://github.com/owner/site.git", "main"]
     switch = next(c for c in gh.calls if c[:2] == ["git", "switch"])
-    assert switch[-1] == "upstream/main"
+    assert switch[-1] == "FETCH_HEAD"
+    assert not any(c[:3] == ["git", "remote", "add"] for c in gh.calls)
 
 
 def test_cli_dry_run_validates_without_touching_github(tmp_path, monkeypatch):
