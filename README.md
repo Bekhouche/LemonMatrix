@@ -3,7 +3,7 @@
 A benchmarking control plane for [Lemonade](https://lemonade-server.ai) instances.
 One profile = one Lemonade instance, auto-discovered and reused as the environment
 fingerprint for every run on that machine. See
-[schema/result.schema.json](schema/result.schema.json) for the canonical result
+[schema/result.schema.json](https://github.com/Bekhouche/LemonMatrix/blob/main/schema/result.schema.json) for the canonical result
 schema.
 
 **Live public leaderboard: [lemonmatrix.github.io](https://lemonmatrix.github.io)**
@@ -17,6 +17,17 @@ schemas in this repo.
 ## Install
 
 ```bash
+pip install lemonmatrix
+```
+
+Python 3.10 or newer. The [step-by-step guide](https://lemonmatrix.github.io/guide.html)
+walks from a running Lemonade to a result on the leaderboard.
+
+To work on LemonMatrix itself:
+
+```bash
+git clone https://github.com/Bekhouche/LemonMatrix.git
+cd LemonMatrix
 pip install -e ".[dev]"
 ```
 
