@@ -15,11 +15,17 @@ file again) before it ships silently.
 
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_SCHEMA_DIR = REPO_ROOT / "schema"
 PACKAGE_SCHEMA_DIR = REPO_ROOT / "src" / "lemonmatrix" / "schema"
 
+# The sdist ships tests but not the repo-root schema/ links, so these checks only run in a git checkout.
+repo_layout_only = pytest.mark.skipif(not REPO_SCHEMA_DIR.is_dir(), reason="needs a git checkout")
 
+
+@repo_layout_only
 def test_every_repo_root_schema_file_is_a_symlink_into_the_package():
     schema_files = sorted(REPO_SCHEMA_DIR.glob("*.json"))
     assert schema_files, "expected at least one schema file at the repo root"
@@ -35,6 +41,7 @@ def test_every_repo_root_schema_file_is_a_symlink_into_the_package():
         )
 
 
+@repo_layout_only
 def test_every_package_schema_file_is_shipped_and_exposed_at_the_repo_root():
     # The inverse check: every schema setuptools will package must also be
     # reachable from the repo root (so validate.py's dev-mode lookup and the
@@ -45,3 +52,15 @@ def test_every_package_schema_file_is_shipped_and_exposed_at_the_repo_root():
     repo_root_names = {p.name for p in REPO_SCHEMA_DIR.glob("*.json")}
     for path in package_files:
         assert path.name in repo_root_names, f"{path.name} is packaged but missing from {REPO_SCHEMA_DIR}"
+
+
+def test_version_flag_reports_the_installed_version():
+    from click.testing import CliRunner
+
+    import lemonmatrix
+    from lemonmatrix.cli import cli
+
+    result = CliRunner().invoke(cli, ["--version"])
+
+    assert result.exit_code == 0
+    assert lemonmatrix.__version__ in result.output

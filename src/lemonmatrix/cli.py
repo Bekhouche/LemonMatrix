@@ -121,6 +121,7 @@ def _save_profile(name: str, base_url: str, api_key: str | None, driver_version,
 
 
 @click.group()
+@click.version_option(package_name="lemonmatrix")
 def cli() -> None:
     """LemonMatrix: benchmark Lemonade instances and emit comparable results."""
 
