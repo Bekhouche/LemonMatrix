@@ -5,7 +5,14 @@ import pytest
 from click.testing import CliRunner
 
 from lemonmatrix.cli import cli
-from lemonmatrix.importers import LEMONADE_LAB, LEMONMETRICS, detect_source, import_result
+from lemonmatrix.importers import (
+    LEMONADE_BENCH_SITE,
+    LEMONADE_LAB,
+    LEMONMETRICS,
+    detect_source,
+    import_documents,
+    import_result,
+)
 from lemonmatrix.results_store import list_imported_results, list_results, save_imported_result
 from lemonmatrix.validate import validate_imported_result
 
@@ -195,3 +202,74 @@ def test_cli_import_fails_on_an_unrecognized_file(tmp_path):
 
     assert result.exit_code == 1
     assert "SKIP" in result.output
+
+
+def _bench_site_row(gpu: str, backend: str, scenario: str, tps: float, **extra) -> dict:
+    row = {
+        "benchmark_id": f"{gpu}-{backend}-{scenario}",
+        "model": "Qwen3.5-35B-A3B-GGUF",
+        "fork": None,
+        "backend": backend,
+        "cpu": "",
+        "os": "linux",
+        "gpu_name": gpu,
+        "gpu_type": "amd",
+        "scenario": scenario,
+        "tps_max": tps + 0.4,
+        "tps_mean": tps,
+        "duration_ms_max": 4441.7,
+        "ttft_ms_max": 197.9,
+    }
+    row.update(extra)
+    return row
+
+
+def _bench_site_file() -> list:
+    return [
+        _bench_site_row("Radeon 8060S Graphics (gfx1151)", "vulkan", "chat-short", 60.4),
+        _bench_site_row("Radeon 8060S Graphics (gfx1151)", "rocm", "chat-short", 55.1),
+        _bench_site_row("AMD Radeon RX 7900 XT (gfx1100)", "rocm", "chat-short", 88.0, fork="nathanw"),
+    ]
+
+
+def test_detect_source_recognizes_a_bench_site_row_list():
+    assert detect_source(_bench_site_file()) == LEMONADE_BENCH_SITE
+    assert detect_source([{"model": "x"}]) is None
+    assert detect_source([]) is None
+
+
+def test_bench_site_import_gives_one_document_per_machine():
+    data = _bench_site_file()
+    docs = import_documents(data, json.dumps(data).encode())
+
+    assert [d["environment"]["gpu"] for d in docs] == [
+        "AMD Radeon RX 7900 XT (gfx1100)", "Radeon 8060S Graphics (gfx1151)",
+    ]
+    assert len({d["import_id"] for d in docs}) == 2
+    strix = docs[1]
+    assert {(r["backend"], r["value"]) for r in strix["rows"]} == {("vulkan", 60.4), ("rocm", 55.1)}
+    assert all(r["compute_engine"] == "gpu" and r["scenario"] == "chat-short" for r in strix["rows"])
+    assert docs[0]["rows"][0]["backend"] == "rocm (nathanw)"
+    assert "cpu" not in strix["environment"]  # the site sends "" when it doesn't know
+    for doc in docs:
+        assert doc["source"]["tool"] == LEMONADE_BENCH_SITE
+        assert doc["validity"]["validated"] is False
+        validate_imported_result(doc)
+
+
+def test_bench_site_rows_need_import_documents_not_import_result():
+    data = _bench_site_file()
+    with pytest.raises(ValueError, match="import_documents"):
+        import_result(data, json.dumps(data).encode())
+
+
+def test_cli_imports_a_bench_site_file_per_machine(tmp_path):
+    src = tmp_path / "bench-site.json"
+    src.write_text(json.dumps(_bench_site_file()))
+    out = tmp_path / "results"
+
+    result = CliRunner().invoke(cli, ["import", str(src), "--out", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("OK ") == 2
+    assert len(list((out / "imported" / LEMONADE_BENCH_SITE).glob("*.json"))) == 2

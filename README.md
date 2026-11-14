@@ -106,7 +106,10 @@ touching GitHub.
 [lemonade_lab](https://github.com/skywalk1411/lemonade_lab) (as published in
 amdaibenchmarks) and [LemonMetrics](https://github.com/lemonmetrics/lemonmetrics)
 `report.json` files, which carry Ryzen AI NPU/hybrid rows and energy
-estimates. Each file is normalized into `results/imported/<tool>/` and listed
+estimates. It also reads a saved copy of Lemonade's own bench site
+(`curl -s https://bench.lemonade-server.ai/api/benchmarks > bench-site.json`),
+which becomes one document per machine because the list mixes machines.
+Each file is normalized into `results/imported/<tool>/` and listed
 with `lemonmatrix imported-results`. These numbers did not go through
 LemonMatrix's validity checks, so they are marked `validated: false` and never
 appear on the leaderboard. Host names, commands, URLs and raw power samples are

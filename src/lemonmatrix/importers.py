@@ -1,6 +1,6 @@
 """Import results from other Lemonade benchmark tools.
 
-Two formats are read:
+Three formats are read:
 
 - lemonade_lab (skywalk1411/lemonade_lab, published to amdaibenchmarks): one
   JSON per run with ``system``, ``results[workload][model][backend]`` and
@@ -8,8 +8,11 @@ Two formats are read:
 - LemonMetrics (lemonmetrics/lemonmetrics): a ``report.json`` that wraps
   ``lemonade bench --json`` output, with optional power samples and per-scenario
   energy estimates.
+- Lemonade's own bench site (bench.lemonade-server.ai): a saved copy of its
+  ``/api/benchmarks`` list, one row per model, backend and scenario. One file
+  can hold several machines; each machine becomes its own document.
 
-Both are normalized into ``imported_result.schema.json``. Only measurements are
+All are normalized into ``imported_result.schema.json``. Only measurements are
 kept: host names, command lines, server URLs and raw power samples are dropped.
 LemonMatrix's validity checks never ran on these numbers, so every document is
 marked ``validated: false``; the one check that can run on the numbers alone
@@ -24,6 +27,8 @@ from datetime import datetime, timezone
 
 LEMONADE_LAB = "lemonade_lab"
 LEMONMETRICS = "lemonmetrics"
+LEMONADE_BENCH_SITE = "lemonade_bench_site"
+_BENCH_SITE_KEYS = {"benchmark_id", "model", "backend", "scenario", "tps_mean"}
 
 _LAB_WORKLOADS = {"llm": "llm", "embedding": "embedding", "image_gen": "image_gen"}
 _GPU_BACKENDS = {"vulkan", "rocm", "cuda", "metal", "opencl"}
@@ -55,7 +60,11 @@ def _drop_none(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def detect_source(data: dict) -> str | None:
+def detect_source(data) -> str | None:
+    if isinstance(data, list):
+        if data and all(isinstance(r, dict) and _BENCH_SITE_KEYS <= r.keys() for r in data):
+            return LEMONADE_BENCH_SITE
+        return None
     if isinstance(data.get("results"), dict) and isinstance(data.get("system"), dict):
         return LEMONADE_LAB
     if "lemonmetrics_version" in data and isinstance(data.get("lemonade"), dict):
@@ -192,19 +201,87 @@ def _lemonmetrics(data: dict) -> dict:
     }
 
 
+def _bench_site_machines(rows: list[dict]) -> list[dict]:
+    """One parsed document per machine in a bench.lemonade-server.ai row list."""
+    machines: dict[tuple, list[dict]] = {}
+    for row in rows:
+        key = (row.get("gpu_name") or "", row.get("cpu") or "", row.get("os") or "")
+        machines.setdefault(key, []).append(row)
+    parsed = []
+    for (gpu, cpu, os_name), group in sorted(machines.items()):
+        out_rows = []
+        for r in group:
+            if r.get("tps_mean") is None:
+                continue
+            backend = str(r["backend"])
+            out_rows.append(_drop_none({
+                "workload": "llm",
+                "model": r["model"],
+                "backend": f"{backend} ({r['fork']})" if r.get("fork") else backend,
+                "compute_engine": _engine_for(backend),
+                "scenario": r.get("scenario"),
+                "value": float(r["tps_mean"]),
+                "unit": "tok/s",
+                "ttft_ms": r.get("ttft_ms_max"),
+            }))
+        parsed.append({
+            "key": f"{gpu}|{cpu}|{os_name}",
+            "measured_at": None,
+            "submitted_by": None,
+            "tool_version": None,
+            "environment": _drop_none({"gpu": gpu or None, "cpu": cpu or None, "os": os_name or None}),
+            "settings": None,
+            "power": None,
+            "rows": out_rows,
+            "notes": (
+                "Imported from bench.lemonade-server.ai (lemonade bench submissions): mean tok/s per scenario. "
+                "ttft_ms is the site's maximum over trials, not a mean. The site records no load arguments, "
+                "checkpoint or concurrent activity, so device, exclusivity and quantization were not checked "
+                "by LemonMatrix."
+            ),
+        })
+    return parsed
+
+
+def import_documents(data, raw_bytes: bytes, source: str | None = None) -> list[dict]:
+    """Normalize one source file into one or more imported_result documents.
+
+    lemonade_lab and LemonMetrics files hold one machine and give one document;
+    a bench.lemonade-server.ai row list gives one document per machine.
+    """
+    source = source or detect_source(data)
+    if source == LEMONADE_BENCH_SITE:
+        if not isinstance(data, list):
+            raise ValueError("a bench.lemonade-server.ai file is a JSON list of benchmark rows")
+        return [_build_doc(parsed, raw_bytes, source) for parsed in _bench_site_machines(data)]
+    return [import_result(data, raw_bytes, source)]
+
+
 def import_result(data: dict, raw_bytes: bytes, source: str | None = None) -> dict:
-    """Normalize one source document into the imported_result schema shape."""
+    """Normalize one single-machine source document into the imported_result schema shape."""
     source = source or detect_source(data)
     if source == LEMONADE_LAB:
         parsed = _lemonade_lab(data)
     elif source == LEMONMETRICS:
         parsed = _lemonmetrics(data)
+    elif source == LEMONADE_BENCH_SITE:
+        raise ValueError("bench.lemonade-server.ai files can hold several machines; use import_documents")
     else:
-        raise ValueError("not a lemonade_lab result or a LemonMetrics report.json")
+        raise ValueError(
+            "not a lemonade_lab result, a LemonMetrics report.json or a bench.lemonade-server.ai row list"
+        )
+    return _build_doc(parsed, raw_bytes, source)
+
+
+def _build_doc(parsed: dict, raw_bytes: bytes, source: str) -> dict:
     if not parsed["rows"]:
         raise ValueError(f"no measurements found in this {source} file")
 
     digest = hashlib.sha256(raw_bytes).hexdigest()
+    import_id = digest[:16]
+    if parsed.get("key"):
+        # Several machines from one file: keep each id stable and distinct.
+        import_id = hashlib.sha256(f"{digest}|{parsed['key']}".encode()).hexdigest()[:16]
     validity: dict = {"validated": False, "notes": parsed["notes"]}
     warnings = _same_value_warnings(parsed["rows"])
     if warnings:
@@ -213,7 +290,7 @@ def import_result(data: dict, raw_bytes: bytes, source: str | None = None) -> di
     doc: dict = {
         "schema_version": "0.1.0",
         "run_type": "imported",
-        "import_id": digest[:16],
+        "import_id": import_id,
         "imported_at": datetime.now(timezone.utc).isoformat(),
         "measured_at": parsed["measured_at"],
         "source": _drop_none({

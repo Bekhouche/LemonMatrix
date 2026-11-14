@@ -19,7 +19,7 @@ from .capabilities import (available_backends, available_compute_engines, availa
                            is_router_model, validate_combo_against_profile)
 from .client import BENCH_TIMEOUT, LemonadeClient, job_progress_percent
 from .discover import QUICK_SELECT_PORTS, expand_subnet, scan, scan_localhost
-from .importers import LEMONADE_LAB, LEMONMETRICS, import_result
+from .importers import LEMONADE_BENCH_SITE, LEMONADE_LAB, LEMONMETRICS, import_documents
 from .profile import DEFAULT_PORT, DEFAULT_PROFILE_DIR, Profile, build_url, connect_and_save
 from .prompt_sets import PROMPT_SETS, load_prompt_file
 from .results_store import (list_audiogen_results, list_classify_results, list_embeddings_results,
@@ -1987,13 +1987,14 @@ def export(results_dir: str, profile_name: str | None, valid_only: bool, out_fil
 
 @cli.command("import")
 @click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
-@click.option("--source", type=click.Choice([LEMONADE_LAB, LEMONMETRICS]), default=None,
+@click.option("--source", type=click.Choice([LEMONADE_LAB, LEMONMETRICS, LEMONADE_BENCH_SITE]), default=None,
               help="Source format (default: detect from the file).")
 @click.option("--out", "out_dir", type=click.Path(file_okay=False), default="results", show_default=True)
 def import_results(paths: tuple[str, ...], source: str | None, out_dir: str) -> None:
-    """Import results from lemonade_lab (amdaibenchmarks) or LemonMetrics.
+    """Import results from lemonade_lab (amdaibenchmarks), LemonMetrics or bench.lemonade-server.ai.
 
-    Each file becomes results/imported/<tool>/<id>.json, marked
+    Each file becomes results/imported/<tool>/<id>.json (one per machine for
+    a bench.lemonade-server.ai row list), marked
     validated: false: these numbers did not go through LemonMatrix's
     validity checks and never appear on the leaderboard. Host names,
     commands, URLs and raw power samples are not copied.
@@ -2001,21 +2002,25 @@ def import_results(paths: tuple[str, ...], source: str | None, out_dir: str) -> 
     \b
       lemonmatrix import amdaibenchmarks/results/*.json
       lemonmatrix import lemonmetrics-site/data/results/*/*/report.json
+      curl -s https://bench.lemonade-server.ai/api/benchmarks > bench-site.json
+      lemonmatrix import bench-site.json
     """
     failed = 0
     for path in paths:
         raw = Path(path).read_bytes()
         try:
-            doc = import_result(json.loads(raw), raw, source)
-            validate_imported_result(doc)
+            docs = import_documents(json.loads(raw), raw, source)
+            for doc in docs:
+                validate_imported_result(doc)
         except (ValueError, jsonschema.ValidationError) as exc:
             click.secho(f"SKIP  {path}: {exc}", fg="yellow")
             failed += 1
             continue
-        out_path = save_imported_result(out_dir, doc)
-        click.secho(f"OK    {path} -> {out_path} ({len(doc['rows'])} row(s))", fg="green")
-        for warning in doc["validity"].get("warnings", []):
-            click.secho(f"      warning: {warning}", fg="yellow")
+        for doc in docs:
+            out_path = save_imported_result(out_dir, doc)
+            click.secho(f"OK    {path} -> {out_path} ({len(doc['rows'])} row(s))", fg="green")
+            for warning in doc["validity"].get("warnings", []):
+                click.secho(f"      warning: {warning}", fg="yellow")
     if failed:
         raise SystemExit(1)
 
@@ -2031,8 +2036,9 @@ def imported_results(results_dir: str) -> None:
     for doc in docs:
         env = doc["environment"]
         who = doc["source"].get("submitted_by")
+        machine = " / ".join(env[k] for k in ("gpu", "cpu") if env.get(k)) or "?"
         click.secho(
-            f"{doc['source']['tool']}  {doc.get('measured_at') or '?'}  {env.get('cpu', '?')}"
+            f"{doc['source']['tool']}  {doc.get('measured_at') or '?'}  {machine}"
             + (f"  (by {who})" if who else ""),
             bold=True,
         )

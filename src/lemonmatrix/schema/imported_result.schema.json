@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Bekhouche/LemonMatrix/schema/imported_result.schema.json",
   "title": "LemonMatrix imported result",
-  "description": "Results produced by another Lemonade benchmark tool (lemonade_lab/amdaibenchmarks, LemonMetrics) and normalized into one shape. LemonMatrix's own validity checks never ran on these numbers, so they are kept apart from the model/router leaderboard and always carry validated: false.",
+  "description": "Results produced by another Lemonade benchmark tool (lemonade_lab/amdaibenchmarks, LemonMetrics, bench.lemonade-server.ai) and normalized into one shape. LemonMatrix's own validity checks never ran on these numbers, so they are kept apart from the model/router leaderboard and always carry validated: false.",
   "type": "object",
   "required": ["schema_version", "run_type", "import_id", "imported_at", "source", "environment", "rows", "validity"],
   "additionalProperties": false,
   "properties": {
     "schema_version": { "const": "0.1.0" },
     "run_type": { "const": "imported" },
-    "import_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "First 16 hex digits of the source file's SHA-256." },
+    "import_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "First 16 hex digits of the source file's SHA-256, or of a hash of it and the machine when one file holds several machines." },
     "imported_at": { "type": "string" },
     "measured_at": { "type": ["string", "null"] },
     "source": {
@@ -17,7 +17,7 @@
       "required": ["tool", "file_sha256"],
       "additionalProperties": false,
       "properties": {
-        "tool": { "enum": ["lemonade_lab", "lemonmetrics"] },
+        "tool": { "enum": ["lemonade_lab", "lemonmetrics", "lemonade_bench_site"] },
         "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "submitted_by": { "type": "string" },
         "tool_version": { "type": "string" }
