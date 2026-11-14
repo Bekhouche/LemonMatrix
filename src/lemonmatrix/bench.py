@@ -33,7 +33,7 @@ import requests
 from .backend_version import lookup_backend_version, resolve_backend
 from .capabilities import engine_backend_compatible, expected_engine_for_model, parse_quantization
 from .client import LemonadeClient
-from .routing_cost import summarize_routing
+from .routing_cost import CLOUD_RECIPE, summarize_routing
 
 STATS_TTFT_IS_SECONDS = True
 
@@ -528,9 +528,28 @@ def _aggregate_sweep_result(
     turns raw measurements into a result is identical either way, only how
     the measurements were taken differs.
     """
-    ttft_vals = [t["ttft_ms"] for t in raw_trials]
-    decode_vals = [t["decode_tokens_per_sec"] for t in raw_trials if t["decode_tokens_per_sec"] is not None]
-    prompt_vals = [t["prompt_tokens"] for t in raw_trials]
+    # Speed comes from Lemonade's /v1/stats, which only times local backends:
+    # a request a router sent to a cloud candidate leaves it at zero or at the
+    # previous local request. Router runs therefore time only the trials a
+    # local candidate served; cost still uses every trial.
+    timed, speed_note = raw_trials, None
+    if is_router and candidate_recipes:
+        local = [t for t in raw_trials if candidate_recipes.get(t.get("route_to")) != CLOUD_RECIPE]
+        cloud_count = len(raw_trials) - len(local)
+        if cloud_count and local:
+            timed = local
+            speed_note = (
+                f"TTFT, prefill and decode cover the {len(local)} of {len(raw_trials)} requests served "
+                "locally; Lemonade does not time cloud requests"
+            )
+        elif cloud_count:
+            speed_note = (
+                "every request went to a cloud candidate, which Lemonade does not time: "
+                "TTFT, prefill and decode are not measurements"
+            )
+    ttft_vals = [t["ttft_ms"] for t in timed]
+    decode_vals = [t["decode_tokens_per_sec"] for t in timed if t["decode_tokens_per_sec"] is not None]
+    prompt_vals = [t["prompt_tokens"] for t in timed]
 
     ttft_ms = _mean(ttft_vals)
     decode_tps = _mean(decode_vals)
@@ -558,7 +577,7 @@ def _aggregate_sweep_result(
     # Prefill stats derived from per-trial prompt_tokens / ttft_ms pairs
     prefill_per_trial = [
         (t["prompt_tokens"] / (t["ttft_ms"] / 1000))
-        for t in raw_trials
+        for t in timed
         if t["prompt_tokens"] and t["ttft_ms"]
     ]
     stddev_p = _stddev(prefill_per_trial)
@@ -668,6 +687,8 @@ def _aggregate_sweep_result(
     cache_ok, cache_note = (True, None) if is_router else _prompt_cache_verdict(raw_trials)
     if cache_note:
         notes.append(cache_note)
+    if speed_note:
+        notes.append(speed_note)
     if not engine_ok:
         notes.append(f"engine/backend mismatch: {engine_reason}")
     if mean_watts is None:

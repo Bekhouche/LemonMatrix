@@ -339,3 +339,62 @@ def test_cli_rejects_a_malformed_cost_override():
 
     assert result.exit_code != 0
     assert "--cost:" in result.output
+
+
+def _with_cloud_candidate(monkeypatch):
+    """The fake router gains a cloud component, listed with recipe "cloud" like Lemonade does."""
+    import conftest
+
+    models = []
+    for m in conftest.FAKE_MODELS["data"]:
+        if m["id"] == FAKE_ROUTER_MODEL_ID:
+            m = {**m, "components": [*m["components"], CLOUD]}
+        models.append(m)
+    models.append({"id": CLOUD, "object": "model", "recipe": "cloud", **CLOUD_PRICE})
+    monkeypatch.setitem(conftest.FAKE_MODELS, "data", models)
+
+
+def test_router_speed_covers_only_locally_served_requests(fake_lemonade, monkeypatch):
+    _with_cloud_candidate(monkeypatch)
+    original = bench_mod._run_one
+
+    def fake_run_one(client, cfg):
+        trial = original(client, cfg)
+        if "code" in cfg.prompt:
+            # Lemonade's /v1/stats does not time cloud requests.
+            trial.update(route_to=CLOUD, ttft_ms=0.0, decode_tokens_per_sec=0.0)
+        else:
+            trial["route_to"] = "Llama-3.1-8B-Instruct-GGUF"
+        return trial
+
+    monkeypatch.setattr(bench_mod, "_run_one", fake_run_one)
+    client = LemonadeClient(fake_lemonade)
+    environment, _ = discover_environment(client)
+
+    result, trials = run_sweep(client, environment, _router_cfg(prompts=["chat", "code"]))
+
+    validate_result(result)
+    import conftest
+    assert result["metrics"]["decode"]["tokens_per_sec"] == pytest.approx(conftest.FAKE_STATS["tokens_per_second"])
+    assert result["metrics"]["ttft_ms"] == pytest.approx(conftest.FAKE_STATS["time_to_first_token"] * 1000)
+    assert "cover the 2 of 4 requests served locally" in result["validity"]["notes"]
+    assert result["metrics"]["routing"]["requests"] == 4  # cost still counts every request
+
+
+def test_router_run_served_only_by_the_cloud_says_its_speed_is_not_measured(fake_lemonade, monkeypatch):
+    _with_cloud_candidate(monkeypatch)
+    original = bench_mod._run_one
+
+    def fake_run_one(client, cfg):
+        trial = original(client, cfg)
+        trial.update(route_to=CLOUD, ttft_ms=1.0, decode_tokens_per_sec=1.0)
+        return trial
+
+    monkeypatch.setattr(bench_mod, "_run_one", fake_run_one)
+    client = LemonadeClient(fake_lemonade)
+    environment, _ = discover_environment(client)
+
+    result, _ = run_sweep(client, environment, _router_cfg(prompts=["code"]))
+
+    validate_result(result)
+    assert "not measurements" in result["validity"]["notes"]
