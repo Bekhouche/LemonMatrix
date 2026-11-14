@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 import requests
 
 from .backend_version import lookup_backend_version, resolve_backend
-from .capabilities import engine_backend_compatible, parse_quantization
+from .capabilities import engine_backend_compatible, expected_engine_for_model, parse_quantization
 from .client import LemonadeClient
 from .routing_cost import summarize_routing
 
@@ -128,7 +128,9 @@ def _own_model_entry(health: dict, own_model_names: set[str]) -> dict | None:
     )
 
 
-def _device_matches_engine(device_str: str | None, compute_engine: str) -> bool | None:
+def _device_matches_engine(
+    device_str: str | None, compute_engine: str, backend: str | None = None
+) -> bool | None:
     """True/False if Lemonade's own /api/v1/health-reported `device` for the
     loaded model (confirmed live: a "|"-joined bitmask string like "cpu",
     "gpu", or "cpu|gpu" -- Lemonade's DeviceType is a bitmask, not an enum)
@@ -139,13 +141,21 @@ def _device_matches_engine(device_str: str | None, compute_engine: str) -> bool 
     integrated GPU apart from a discrete one, so igpu and dgpu both map to
     the same expected token here; a genuine igpu-vs-dgpu mislabel is not
     something this check can catch.
+
+    ryzenai-llm reports "npu" for every model, whatever its deployment
+    (Lemonade's ryzenai descriptor sets default_device NPU and, unlike
+    llamacpp and whispercpp, never overrides it per load), so its "-CPU" and
+    "-Hybrid" models cannot be checked here: None.
     """
     if not device_str:
+        return None
+    devices = set(device_str.split("|"))
+    if backend and backend.rpartition("-")[0] == "ryzenai-llm" and compute_engine in ("cpu", "hybrid"):
         return None
     expected = {"cpu": {"cpu"}, "igpu": {"gpu"}, "dgpu": {"gpu"}, "npu": {"npu"}}.get(compute_engine)
     if expected is None:
         return None
-    return set(device_str.split("|")) == expected
+    return devices == expected
 
 
 class _ExclusivityMonitor:
@@ -362,7 +372,7 @@ def run_sweep(
     engine_ok = True
     engine_reason = ""
     if not is_router:
-        engine_ok, engine_reason = engine_backend_compatible(cfg.compute_engine, cfg.backend)
+        engine_ok, engine_reason = engine_backend_compatible(cfg.compute_engine, cfg.backend, cfg.model_name)
 
     try:
         system_info = client.system_info()
@@ -633,7 +643,9 @@ def _aggregate_sweep_result(
     # we could actually poll it -- see _exclusivity_verdict/_device_verdict/
     # _watchdog_verdict's docstrings for the full rationale on each.
     exclusive_run, exclusivity_note = _exclusivity_verdict(exclusivity, cfg.exclusive_run)
-    device_ok, device_note = _device_verdict(exclusivity, cfg.compute_engine, is_router)
+    device_ok, device_note = _device_verdict(
+        exclusivity, cfg.compute_engine, is_router, backend=cfg.backend, model=cfg.model_name
+    )
     model_reload_free, reload_note = _watchdog_verdict(exclusivity)
     # Quantization has no meaningful claim for router runs (schema forces it
     # to "none"), so skip the check the same way engine/backend and device
@@ -1013,7 +1025,8 @@ def _exclusivity_verdict(exclusivity: "_ExclusivityMonitor", asserted: bool) -> 
 
 
 def _device_verdict(
-    exclusivity: "_ExclusivityMonitor", compute_engine: str, is_router: bool = False
+    exclusivity: "_ExclusivityMonitor", compute_engine: str, is_router: bool = False,
+    backend: str | None = None, model: str | None = None,
 ) -> tuple[bool, str | None]:
     """Cross-checks the caller's compute_engine claim against Lemonade's own
     /api/v1/health-reported device for the model this run actually loaded.
@@ -1025,7 +1038,15 @@ def _device_verdict(
     """
     if is_router:
         return True, None
-    if _device_matches_engine(exclusivity.own_device_seen, compute_engine) is False:
+    verdict = _device_matches_engine(exclusivity.own_device_seen, compute_engine, backend)
+    if verdict is None and exclusivity.own_device_seen and backend and expected_engine_for_model(model, backend):
+        # Valid, but say why the server's device field was not used.
+        return True, (
+            f"device not verifiable: Lemonade reports '{exclusivity.own_device_seen}' for every "
+            f"{backend.rpartition('-')[0]} model; the '{compute_engine}' engine comes from the model name "
+            f"'{model}'"
+        )
+    if verdict is False:
         return False, (
             f"compute_engine claimed '{compute_engine}' but Lemonade's own /api/v1/health reported "
             f"device '{exclusivity.own_device_seen}' for this model"

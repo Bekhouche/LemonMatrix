@@ -1584,7 +1584,9 @@ def create_app(results_dir: str | Path = "results") -> Flask:
 
             compute_engine = str(raw.get("compute_engine") or "").strip()
             backend_val = str(raw.get("backend") or "").strip()
-            issues = validate_combo_against_profile(compute_engine, backend_val, system_info, prof.environment)
+            issues = validate_combo_against_profile(
+                compute_engine, backend_val, system_info, prof.environment, model=model_name
+            )
             if issues:
                 skipped.append(f"{model_name} ({compute_engine}/{backend_val})")
                 continue
@@ -1729,7 +1731,9 @@ def create_app(results_dir: str | Path = "results") -> Flask:
             skipped_labels = []
             combos = []
             for c in raw_combos:
-                issues = validate_combo_against_profile(c["compute_engine"], c["backend"], si_post, prof.environment)
+                issues = validate_combo_against_profile(
+                    c["compute_engine"], c["backend"], si_post, prof.environment, model=c.get("model_name")
+                )
                 if issues:
                     skipped_labels.append(f"{c['compute_engine']}/{c['backend']}")
                 else:

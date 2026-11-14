@@ -90,6 +90,25 @@ of a small local model for the same prompt. The extra requests run outside the
 measured window; `--estimate-baseline` skips them and reuses the routed
 model's token counts, and the result's `baseline_method` says which was used.
 
+## Ryzen AI NPU and hybrid runs
+
+Lemonade's `ryzenai-llm` recipe has one backend, `ryzenai-llm-npu`, and the
+model's name says where it runs: `-Hybrid` (NPU and iGPU), `-NPU` or `-CPU`.
+FastFlowLM (`flm-npu`) runs every model on the NPU. LemonMatrix takes the
+engine from the model, so a run whose `--engine` contradicts it is refused,
+and `lemonmatrix sweep` without `--engine` runs each of these models on its
+own engine:
+
+```bash
+lemonmatrix sweep --profile my-laptop --backend ryzenai-llm-npu \
+  --model Llama-3.2-1B-Instruct-Hybrid --model Llama-3.2-1B-Instruct-NPU \
+  --model Llama-3.2-1B-Instruct-CPU --power-state plugged
+```
+
+Lemonade reports the device `npu` for every `ryzenai-llm` model, whatever
+its deployment, so for `-Hybrid` and `-CPU` models the device check cannot
+confirm the engine; the result is still ranked and its notes say so.
+
 ## Submitting results
 
 `lemonmatrix submit results/my-machine/<run_id>.json` opens a pull request

@@ -89,7 +89,39 @@ _BACKEND_KEY_ENGINE_SUGGESTIONS: dict[str, str] = {
 }
 
 
-def engine_backend_compatible(compute_engine: str, backend: str) -> tuple[bool, str]:
+# Ryzen AI recipes. ryzenai-llm has a single "npu" backend, and the model's
+# own name says where it runs: "-Hybrid" (NPU + iGPU), "-NPU" or "-CPU".
+# FastFlowLM (flm) runs every model on the NPU.
+NPU_RECIPES = ("ryzenai-llm", "flm")
+_RYZENAI_SUFFIX_ENGINES = (("-hybrid", "hybrid"), ("-npu", "npu"), ("-cpu", "cpu"))
+
+
+def _recipe_of(backend: str) -> str:
+    return backend.rpartition("-")[0]
+
+
+def expected_engine_for_model(model: str | None, backend: str) -> str | None:
+    """The compute engine a model must run on, when its recipe fixes it.
+
+    ryzenai-llm models carry their deployment in the name (Lemonade's own
+    registry: "Llama-3.2-1B-Instruct-Hybrid", "...-NPU", "...-CPU"), all on
+    the one "ryzenai-llm-npu" backend. flm models always run on the NPU.
+    None for every other recipe: there the engine is the caller's choice.
+    """
+    recipe = _recipe_of(backend)
+    if recipe == "flm":
+        return "npu"
+    if recipe == "ryzenai-llm" and model:
+        name = model.lower().removeprefix("user.")
+        for suffix, engine in _RYZENAI_SUFFIX_ENGINES:
+            if name.endswith(suffix):
+                return engine
+    return None
+
+
+def engine_backend_compatible(
+    compute_engine: str, backend: str, model: str | None = None
+) -> tuple[bool, str]:
     """Return (True, "") or (False, human-readable reason + fix suggestion).
 
     A run declared as "cpu" with a GPU-only backend (rocm, vulkan, cuda) is a
@@ -102,7 +134,22 @@ def engine_backend_compatible(compute_engine: str, backend: str) -> tuple[bool, 
     hyphen and look it up in the table above.  Unknown backend keys (anything
     not in the table) are considered compatible to avoid blocking future
     Lemonade backends that haven't been enumerated yet.
+
+    Given the model name, Ryzen AI recipes are checked against the engine the
+    model itself fixes (see expected_engine_for_model): a "-CPU" ryzenai-llm
+    model declared as npu is refused, and so is a "-Hybrid" one declared as npu.
     """
+    expected = expected_engine_for_model(model, backend)
+    if expected is not None:
+        if compute_engine == expected:
+            return True, ""
+        return False, (
+            f"engine '{compute_engine}' + backend '{backend}' does not match model '{model}'.\n"
+            f"  {_recipe_of(backend)} runs this model on '{expected}' (fixed by the model, not the backend).\n"
+            f"  Fix: use --engine {expected}."
+        )
+    if _recipe_of(backend) == "ryzenai-llm" and compute_engine in ("npu", "hybrid", "cpu"):
+        return True, ""  # no model name given: any of its three deployments is possible
     _, _, backend_key = backend.rpartition("-")
     allowed = _BACKEND_KEY_ENGINES.get(backend_key)
     if allowed is None:
@@ -118,8 +165,13 @@ def engine_backend_compatible(compute_engine: str, backend: str) -> tuple[bool, 
     return True, ""
 
 
-def compatible_engines_for_backend(backend: str) -> list[str]:
+def compatible_engines_for_backend(backend: str, model: str | None = None) -> list[str]:
     """Return the compute engines that can legally pair with this backend string."""
+    expected = expected_engine_for_model(model, backend)
+    if expected is not None:
+        return [expected]
+    if _recipe_of(backend) == "ryzenai-llm":
+        return ["cpu", "hybrid", "npu"]
     _, _, backend_key = backend.rpartition("-")
     allowed = _BACKEND_KEY_ENGINES.get(backend_key)
     return sorted(allowed) if allowed else []
@@ -131,6 +183,7 @@ def validate_combo_against_profile(
     system_info: dict,
     environment: dict,
     modality: str | None = "Text generation",
+    model: str | None = None,
 ) -> list[str]:
     """Check an engine/backend combo against the live profile and return a list of issues.
 
@@ -151,7 +204,7 @@ def validate_combo_against_profile(
     issues: list[str] = []
 
     # 1. Logical compatibility.
-    ok, reason = engine_backend_compatible(compute_engine, backend)
+    ok, reason = engine_backend_compatible(compute_engine, backend, model)
     if not ok:
         issues.append(reason)
 
@@ -162,6 +215,15 @@ def validate_combo_against_profile(
         issues.append(
             f"engine '{compute_engine}' is not present on this hardware "
             f"(detected: {detected})."
+        )
+    if (
+        compute_engine == "hybrid"
+        and expected_engine_for_model(model, backend) == "hybrid"
+        and "npu" not in present_engines
+    ):
+        detected = ", ".join(present_engines) if present_engines else "none detected"
+        issues.append(
+            f"Ryzen AI hybrid models need an NPU, and Lemonade reports none on this hardware (detected: {detected})."
         )
 
     # 3. Backend installed state.

@@ -15,6 +15,7 @@ from .bench import (AudioGenConfig, ClassifyConfig, EmbeddingsConfig, ImageGenCo
                      run_embeddings, run_imagegen, run_meshgen, run_rerank, run_stt, run_sweep,
                      run_sweep_via_job, run_tts)
 from .capabilities import (available_backends, available_compute_engines, available_routers,
+                           expected_engine_for_model,
                            compatible_engines_for_backend, engine_backend_compatible, host_os,
                            is_router_model, validate_combo_against_profile)
 from .client import BENCH_TIMEOUT, LemonadeClient, job_progress_percent
@@ -540,7 +541,9 @@ def run(
         except Exception:
             system_info = {}
 
-        issues = validate_combo_against_profile(compute_engine, backend, system_info, prof.environment)
+        issues = validate_combo_against_profile(
+            compute_engine, backend, system_info, prof.environment, model=model_name
+        )
         if issues:
             click.secho("Configuration problem(s) detected:", fg="red", bold=True)
             for issue in issues:
@@ -550,7 +553,7 @@ def run(
                 click.secho("--force supplied: proceeding anyway. Result will be marked invalid.", fg="yellow")
             else:
                 # Offer compatible engines as a hint.
-                good_engines = compatible_engines_for_backend(backend)
+                good_engines = compatible_engines_for_backend(backend, model_name)
                 if good_engines:
                     click.secho(
                         f"\nCompatible engines for '{backend}': {', '.join(good_engines)}",
@@ -1789,14 +1792,26 @@ def sweep(
     # Build the full Cartesian product with upfront compatibility check.
     combos = []
     skipped_report: list[tuple[str, str, list[str]]] = []  # (engine, backend, issues)
-    for variant, engine, backend_str, power_state in itertools.product(variants, engine_list, backends, power_states):
-        if run_type != "router":
-            issues = validate_combo_against_profile(engine, backend_str, system_info, prof.environment)
-            if issues:
-                skipped_report.append((engine, backend_str, issues))
-                if skip_incompatible:
-                    continue
-        combos.append({**variant, "compute_engine": engine, "backend": backend_str, "power_state": power_state})
+
+    def _engines_for(variant: dict, backend_str: str) -> list[str]:
+        # Ryzen AI recipes fix the engine per model (-Hybrid/-NPU/-CPU, flm =
+        # NPU). With auto-detected engines, run exactly that one: "hybrid" is
+        # never a detected hardware engine, and every other engine would only
+        # be reported as an invalid combo.
+        fixed = None if engines or run_type == "router" else expected_engine_for_model(variant["id"], backend_str)
+        return [fixed] if fixed else engine_list
+
+    for variant, backend_str, power_state in itertools.product(variants, backends, power_states):
+        for engine in _engines_for(variant, backend_str):
+            if run_type != "router":
+                issues = validate_combo_against_profile(
+                    engine, backend_str, system_info, prof.environment, model=variant["id"]
+                )
+                if issues:
+                    skipped_report.append((engine, backend_str, issues))
+                    if skip_incompatible:
+                        continue
+            combos.append({**variant, "compute_engine": engine, "backend": backend_str, "power_state": power_state})
 
     if skipped_report:
         click.secho(f"\n{'Skipping' if skip_incompatible else 'Warning:'} {len(skipped_report)} invalid combo(s):",
