@@ -61,6 +61,17 @@ range for the multi-machine fleet case. Lemonade has no
 announce/broadcast mechanism, so this is a bounded port scan, not magic
 discovery -- capped at 1024 hosts per scan.
 
+## What a model run measures
+
+Each trial sends the same prompt with `cache_prompt: false`, so llama.cpp
+processes the whole prompt every time instead of serving it from its prompt
+cache, while the model stays loaded (warmups are real warmups). TTFT and
+prefill therefore time the prompt, not a cache hit. Each trial records the
+server's `cache_tokens`; a run where any measured trial still reused cached
+prompt tokens is marked invalid. Results from LemonMatrix 0.1.0 and earlier
+did not do this, so their TTFT and prefill are cache-assisted (decode is not
+affected).
+
 ## Router cost runs
 
 A `collection.router` that mixes local and cloud candidates answers one

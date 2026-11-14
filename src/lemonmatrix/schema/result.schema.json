@@ -195,6 +195,7 @@
         "peak_temp_c": { "type": "number" },
         "exclusive_run": { "type": "boolean", "description": "True if no competing GPU/NPU workload ran during measurement." },
         "model_reload_free": { "type": "boolean", "description": "True if the model stayed resident for the whole run (no unload tax)." },
+        "prompt_cache_free": { "type": "boolean", "description": "True if no measured trial reused prompt tokens from the server's prompt cache, so TTFT and prefill time the whole prompt. Absent when the backend does not report it, and in results from LemonMatrix 0.1.0 and earlier, whose TTFT and prefill are cache-assisted." },
         "notes": { "type": "string", "description": "Any flags, caveats, or reasons a gate failed." }
       }
     }

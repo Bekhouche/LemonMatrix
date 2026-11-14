@@ -266,6 +266,14 @@ def _run_one(client: LemonadeClient, cfg: SweepConfig) -> dict:
     kwargs: dict = {}
     if cfg.run_type == "router":
         kwargs["route_trace"] = True
+    else:
+        # Every trial sends the same prompt, so llama.cpp would serve all but
+        # the last prompt token from its cache after the first request
+        # (confirmed live: prompt_n 1, cache_n 23 of 24), and TTFT/prefill
+        # would measure a cache hit. Lemonade passes this through to
+        # llama-server. Router runs keep the default: their candidates can be
+        # cloud providers.
+        kwargs["cache_prompt"] = False
 
     response = client.chat_completion(
         model=cfg.model_name,
@@ -281,6 +289,7 @@ def _run_one(client: LemonadeClient, cfg: SweepConfig) -> dict:
         "decode_tokens_per_sec": stats.get("tokens_per_second"),
         "prompt_tokens": stats.get("prompt_tokens") or stats.get("input_tokens") or 0,
         "output_tokens": stats.get("output_tokens", 0),
+        "cache_tokens": stats.get("cache_tokens"),
         "watts": resources["watts"],
         "vram_gb": resources["vram_gb"],
         "host_memory_gb": resources["host_memory_gb"],
@@ -656,6 +665,9 @@ def _aggregate_sweep_result(
 
     thermal_ok = True
     notes = []
+    cache_ok, cache_note = (True, None) if is_router else _prompt_cache_verdict(raw_trials)
+    if cache_note:
+        notes.append(cache_note)
     if not engine_ok:
         notes.append(f"engine/backend mismatch: {engine_reason}")
     if mean_watts is None:
@@ -678,12 +690,17 @@ def _aggregate_sweep_result(
         # the run: the former means Lemonade may have loaded a different backend
         # than config.backend claims; the latter means the declared engine does
         # not physically match the backend's execution path.
-        "valid": thermal_ok and exclusive_run and not backend_unresolved_note and engine_ok and device_ok and model_reload_free and quantization_ok,
+        "valid": (
+            thermal_ok and exclusive_run and not backend_unresolved_note and engine_ok and device_ok
+            and model_reload_free and quantization_ok and cache_ok
+        ),
         "warmup_discarded": cfg.warmup_trials > 0,
         "thermal_ok": thermal_ok,
         "exclusive_run": exclusive_run,
         "model_reload_free": model_reload_free,
     }
+    if not is_router and any(t.get("cache_tokens") is not None for t in raw_trials):
+        validity["prompt_cache_free"] = cache_ok
     if notes:
         validity["notes"] = "; ".join(notes)
 
@@ -758,12 +775,18 @@ def _build_sweep_job_steps(cfg: SweepConfig, load_kwargs: dict) -> list[dict]:
     for i in range(cfg.warmup_trials):
         steps.append({
             "id": f"warmup_{i}", "op": "chat",
-            "params": {"model": cfg.model_name, "messages": [{"role": "user", "content": cfg.prompt}], "max_tokens": cfg.max_tokens},
+            "params": {
+                "model": cfg.model_name, "messages": [{"role": "user", "content": cfg.prompt}],
+                "max_tokens": cfg.max_tokens, "cache_prompt": False,
+            },
         })
     for i in range(cfg.measured_trials):
         steps.append({
             "id": f"trial_{i}", "op": "chat",
-            "params": {"model": cfg.model_name, "messages": [{"role": "user", "content": cfg.prompt}], "max_tokens": cfg.max_tokens},
+            "params": {
+                "model": cfg.model_name, "messages": [{"role": "user", "content": cfg.prompt}],
+                "max_tokens": cfg.max_tokens, "cache_prompt": False,
+            },
         })
         steps.append({"id": f"stats_{i}", "op": "system_stats"})
     steps.append({"id": "unload_after", "op": "unload"})
@@ -861,6 +884,7 @@ def run_sweep_via_job(client: LemonadeClient, environment: dict, cfg: SweepConfi
             "decode_tokens_per_sec": timings.get("predicted_per_second"),
             "prompt_tokens": usage.get("prompt_tokens") or 0,
             "output_tokens": usage.get("completion_tokens", 0),
+            "cache_tokens": timings.get("cache_n"),
             "watts": stats_out.get("power_w") or stats_out.get("power_watts") or stats_out.get("watts"),
             "vram_gb": stats_out.get("vram_gb"),
             "host_memory_gb": stats_out.get("memory_gb"),
@@ -1051,6 +1075,24 @@ def _device_verdict(
             f"compute_engine claimed '{compute_engine}' but Lemonade's own /api/v1/health reported "
             f"device '{exclusivity.own_device_seen}' for this model"
         )
+    return True, None
+
+
+def _prompt_cache_verdict(raw_trials: list[dict]) -> tuple[bool, str | None]:
+    """Invalid if any measured trial's prompt came partly from the server's
+    prompt cache: its TTFT and prefill would then time a cache hit, not the
+    prompt. cache_tokens is llama.cpp's cache_n (via /v1/stats or a job's
+    timings); backends that don't report it can't be checked, which is said.
+    """
+    reported = [t.get("cache_tokens") for t in raw_trials if t.get("cache_tokens") is not None]
+    hits = [c for c in reported if c > 0]
+    if hits:
+        return False, (
+            f"prompt cache reused on {len(hits)} of {len(raw_trials)} measured trials (up to {max(hits)} "
+            "prompt tokens from cache): TTFT and prefill measure a cache hit"
+        )
+    if raw_trials and not reported:
+        return True, "prompt-cache use not reported by this backend; TTFT and prefill assume a full prompt"
     return True, None
 
 
