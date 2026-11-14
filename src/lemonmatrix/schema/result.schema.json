@@ -120,6 +120,7 @@
         "ttft_ms_ci95_half_width": { "type": "number", "description": "Half-width of the 95% confidence interval on mean TTFT (Student's t, actual trial count)." },
         "trial_count": { "type": "integer", "description": "Number of measured (non-warmup) trials included in aggregated metrics." },
         "peak_memory_gb": { "type": "number" },
+        "prompt_tokens": { "type": "integer", "minimum": 0, "description": "Mean prompt length the server counted per measured request (over the locally served requests for a router run). Prefill and TTFT depend on it." },
         "prompt_sha256": { "type": "string", "description": "SHA-256 of the exact prompt text used, so two results can be confirmed to have run the identical prompt without embedding the (potentially long) prompt itself." },
         "cost_per_1k_tokens_usd": {
           "type": "number",

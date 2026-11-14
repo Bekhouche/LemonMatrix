@@ -661,7 +661,8 @@ def _aggregate_sweep_result(
         "prefill": prefill,
         "decode": decode,
         "ttft_ms": ttft_ms,
-        "trial_count": cfg.measured_trials,
+        # Trials that made it into the metrics: failed requests are left out.
+        "trial_count": len(raw_trials),
         "peak_memory_gb": peak_memory_gb,
         # Reproducibility: lets two results be confirmed to have run the
         # identical prompt without embedding the (potentially long) prompt
@@ -670,6 +671,10 @@ def _aggregate_sweep_result(
             (json.dumps(cfg.prompts) if cfg.prompts else cfg.prompt).encode()
         ).hexdigest(),
     }
+    if prompt_tokens:
+        # Mean prompt length the server counted: prefill and TTFT depend on it,
+        # so runs are only comparable at a similar prompt size.
+        metrics["prompt_tokens"] = round(prompt_tokens)
     if is_router:
         routing = summarize_routing(
             raw_trials,

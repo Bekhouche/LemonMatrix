@@ -54,6 +54,7 @@ def test_one_failed_request_is_left_out_and_the_run_stays_ranked(fake_lemonade, 
 
     validate_result(result)
     assert len(trials) == 39
+    assert result["metrics"]["trial_count"] == 39
     assert result["validity"]["valid"] is True
     assert "1 of 40 measured requests failed" in result["validity"]["notes"]
     assert "type must be string" in result["validity"]["notes"]
@@ -97,3 +98,13 @@ def test_connection_errors_are_recorded_without_the_server_address(fake_lemonade
 
     assert "first: ConnectionError" in result["validity"]["notes"]
     assert "10.1.2.3" not in result["validity"]["notes"]
+
+
+def test_a_result_records_the_prompt_size_the_server_counted(fake_lemonade):
+    import conftest
+    client, environment = _env(fake_lemonade)
+
+    result, _ = run_sweep(client, environment, _cfg(measured_trials=3))
+
+    validate_result(result)
+    assert result["metrics"]["prompt_tokens"] == conftest.FAKE_STATS["prompt_tokens"]
