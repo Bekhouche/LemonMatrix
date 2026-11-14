@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lemonmatrix"
-version = "0.1.0"
+version = "0.1.1"
 description = "Benchmark Lemonade local AI servers and publish comparable, validated results."
 readme = "README.md"
 requires-python = ">=3.10"
