@@ -72,6 +72,13 @@ prompt tokens is marked invalid. Results from LemonMatrix 0.1.0 and earlier
 did not do this, so their TTFT and prefill are cache-assisted (decode is not
 affected).
 
+A run also records whether any other model stayed loaded on the instance
+while it was measured (`validity.other_models_resident`). An idle model still
+holds memory: on a 32 GB R9700 with Qwen3.5-35B-A3B and Qwen3.5-9B idle,
+Qwen3-4B decoded at 21 tok/s instead of 171. Such a run is not ranked.
+`--unload-others` on `run` and `sweep` unloads everything first; it is off by
+default because a profile can point at a server other people are using.
+
 ## Router cost runs
 
 A `collection.router` that mixes local and cloud candidates answers one

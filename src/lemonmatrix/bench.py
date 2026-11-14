@@ -84,11 +84,32 @@ class SweepConfig:
     # Send each prompt the router served elsewhere once to the baseline model,
     # after the measured trials, so the baseline is priced on its own tokens.
     measure_baseline: bool = True
+    # Unload every model on the instance before loading this one, so idle
+    # models left by earlier runs don't share its memory. Opt-in: a profile
+    # can point at a server other people are using.
+    unload_others: bool = False
 
 
 def _ttft_ms(stats: dict) -> float:
     raw = stats.get("time_to_first_token", 0.0) or 0.0
     return raw * 1000 if STATS_TTFT_IS_SECONDS else raw
+
+
+def _resident_model_names(health: dict, own_model_names: set[str]) -> list[str]:
+    """Names of every OTHER model loaded on the instance, busy or idle.
+
+    An idle model still holds memory: with Qwen3.5-35B-A3B and Qwen3.5-9B
+    idle on a 32 GB R9700, Qwen3-4B decoded at 21 tok/s instead of 171. A run
+    that shared the instance this way is invalid; --unload-others gives a
+    clean one.
+    """
+    return sorted(
+        {
+            m["model_name"]
+            for m in health.get("all_models_loaded") or []
+            if m.get("model_name") and m.get("model_name") not in own_model_names
+        }
+    )
 
 
 def _competing_model_names(health: dict, own_model_names: set[str]) -> list[str]:
@@ -192,6 +213,7 @@ class _ExclusivityMonitor:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.competing_models: set[str] = set()
+        self.resident_models: set[str] = set()
         self.poll_count = 0
         self.poll_failures = 0
         self.own_device_seen: str | None = None
@@ -203,6 +225,7 @@ class _ExclusivityMonitor:
             try:
                 health = self.client.health()
                 self.competing_models.update(_competing_model_names(health, self.own_model_names))
+                self.resident_models.update(_resident_model_names(health, self.own_model_names))
                 own = _own_model_entry(health, self.own_model_names)
                 if own:
                     if own.get("device"):
@@ -435,6 +458,8 @@ def run_sweep(
         except Exception:
             own_model_names = cfg.model_name
 
+    if cfg.unload_others:
+        client.unload()
     client.load(cfg.model_name, **load_kwargs)
 
     exclusivity = _ExclusivityMonitor(client, own_model_names)
@@ -689,6 +714,9 @@ def _aggregate_sweep_result(
         notes.append(cache_note)
     if speed_note:
         notes.append(speed_note)
+    others_resident, resident_note = _resident_verdict(exclusivity)
+    if resident_note:
+        notes.append(resident_note)
     if not engine_ok:
         notes.append(f"engine/backend mismatch: {engine_reason}")
     if mean_watts is None:
@@ -713,7 +741,7 @@ def _aggregate_sweep_result(
         # not physically match the backend's execution path.
         "valid": (
             thermal_ok and exclusive_run and not backend_unresolved_note and engine_ok and device_ok
-            and model_reload_free and quantization_ok and cache_ok
+            and model_reload_free and quantization_ok and cache_ok and others_resident is not True
         ),
         "warmup_discarded": cfg.warmup_trials > 0,
         "thermal_ok": thermal_ok,
@@ -722,6 +750,8 @@ def _aggregate_sweep_result(
     }
     if not is_router and any(t.get("cache_tokens") is not None for t in raw_trials):
         validity["prompt_cache_free"] = cache_ok
+    if others_resident is not None:
+        validity["other_models_resident"] = others_resident
     if notes:
         validity["notes"] = "; ".join(notes)
 
@@ -1055,6 +1085,19 @@ def _lookup_checkpoint(client: LemonadeClient, model_name: str) -> str | None:
         return None
 
 
+def _resident_verdict(exclusivity: "_ExclusivityMonitor") -> tuple[bool | None, str | None]:
+    """(other_models_resident, note): None when health was never polled."""
+    if exclusivity.health_unreachable:
+        return None, None
+    others = sorted(exclusivity.resident_models - exclusivity.competing_models)
+    if not others:
+        return False, None
+    return True, (
+        f"other models stayed loaded during measurement and shared the device's memory: {', '.join(others)}"
+        " -- not ranked; use --unload-others for a clean run"
+    )
+
+
 def _exclusivity_verdict(exclusivity: "_ExclusivityMonitor", asserted: bool) -> tuple[bool, str | None]:
     """Shared exclusivity resolution used by run_sweep/run_classify/run_tts/
     run_stt/run_imagegen -- see run_sweep's original comment for the full
@@ -1204,8 +1247,11 @@ def _build_simple_validity(
     exclusive_run, exclusivity_note = _exclusivity_verdict(exclusivity, exclusive_run_asserted)
     device_ok, device_note = _device_verdict(exclusivity, compute_engine)
     model_reload_free, reload_note = _watchdog_verdict(exclusivity)
+    others_resident, resident_note = _resident_verdict(exclusivity)
 
     notes = []
+    if resident_note:
+        notes.append(resident_note)
     if not engine_ok:
         notes.append(f"engine/backend mismatch: {engine_reason}")
     if backend_unresolved_note:
@@ -1218,7 +1264,10 @@ def _build_simple_validity(
         notes.append(exclusivity_note)
 
     validity = {
-        "valid": exclusive_run and engine_ok and device_ok and model_reload_free and not backend_unresolved_note,
+        "valid": (
+            exclusive_run and engine_ok and device_ok and model_reload_free and not backend_unresolved_note
+            and others_resident is not True
+        ),
         "warmup_discarded": warmup_trials > 0,
         "exclusive_run": exclusive_run,
         "model_reload_free": model_reload_free,

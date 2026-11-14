@@ -436,6 +436,9 @@ def profile_downloads_control(name: str, download_id: str, action: str) -> None:
 @click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False), default=None)
 @click.option("--exclusive/--not-exclusive", "exclusive_run", default=True,
               help="Whether a competing GPU/NPU workload ran during measurement.")
+@click.option("--unload-others", is_flag=True, default=False,
+              help="Unload every model on the instance before loading this one, so idle models from earlier "
+                   "runs don't share its memory. Off by default: the instance may be serving other people.")
 @click.option("--parameters-b", type=float, default=None)
 @click.option("--active-parameters-b", type=float, default=None)
 @click.option("--price-per-kwh", "energy_price_usd_per_kwh", type=float, default=None)
@@ -463,6 +466,7 @@ def run(
     max_tokens: int,
     prompt_file: str | None,
     exclusive_run: bool,
+    unload_others: bool,
     parameters_b: float | None,
     active_parameters_b: float | None,
     energy_price_usd_per_kwh: float | None,
@@ -577,6 +581,7 @@ def run(
         measured_trials=measured_trials,
         max_tokens=max_tokens,
         exclusive_run=exclusive_run,
+        unload_others=unload_others,
         parameters_b=parameters_b,
         active_parameters_b=active_parameters_b,
         energy_price_usd_per_kwh=energy_price_usd_per_kwh,
@@ -1657,6 +1662,9 @@ def meshgen_results(results_dir: str, profile_name: str | None) -> None:
 @click.option("--trials", "measured_trials", type=int, default=5, show_default=True)
 @click.option("--max-tokens", type=int, default=256, show_default=True)
 @click.option("--exclusive/--not-exclusive", "exclusive_run", default=True)
+@click.option("--unload-others", is_flag=True, default=False,
+              help="Unload every model on the instance before loading this one, so idle models from earlier "
+                   "runs don't share its memory. Off by default: the instance may be serving other people.")
 @click.option("--price-per-kwh", "energy_price_usd_per_kwh", type=float, default=None)
 @click.option("--hardware-cost-usd", type=float, default=None, help="Purchase price of the hardware, for the cost model's amortized-hardware component.")
 @click.option("--hardware-lifetime-hours", type=float, default=None, help="Expected service life in hours, for the cost model's amortized-hardware component.")
@@ -1681,6 +1689,7 @@ def sweep(
     measured_trials: int,
     max_tokens: int,
     exclusive_run: bool,
+    unload_others: bool,
     energy_price_usd_per_kwh: float | None,
     hardware_cost_usd: float | None,
     hardware_lifetime_hours: float | None,
@@ -1857,6 +1866,7 @@ def sweep(
             measured_trials=measured_trials,
             max_tokens=max_tokens,
             exclusive_run=exclusive_run,
+            unload_others=unload_others,
             energy_price_usd_per_kwh=energy_price_usd_per_kwh,
             hardware_cost_usd=hardware_cost_usd,
             hardware_lifetime_hours=hardware_lifetime_hours,
