@@ -127,7 +127,9 @@ that adds the file to the public leaderboard
 ([LemonMatrix/lemonmatrix.github.io](https://github.com/LemonMatrix/lemonmatrix.github.io)).
 It validates the file against the same schemas the leaderboard's CI uses, forks
 the repo (or reuses your fork), keeps the file's `results/<profile>/...` path,
-pushes and opens the PR with the GitHub CLI. `--dry-run` shows the PR without
+pushes and opens the PR with the GitHub CLI. Each run's per-trial file
+(`results/<profile>/trials/<run_id>.json`) goes along with it, so its page on
+the leaderboard can show the trials. `--dry-run` shows the PR without
 touching GitHub.
 
 ## Importing other tools' results

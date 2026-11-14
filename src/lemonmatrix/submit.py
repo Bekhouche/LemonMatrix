@@ -2,8 +2,9 @@
 
 The flow is the one a contributor would follow by hand: fork the site repo
 (or reuse an existing fork), branch from the upstream main, copy each result
-to the same results/<profile>/... path it has locally, commit, push to the
-fork and open a PR. The site repo's CI then validates the files again before
+to the same results/<profile>/... path it has locally, together with the
+run's per-trial file (<profile>/trials/<run_id>.json) when there is one, so
+the run page can show its trials; commit, push to the fork and open a PR. The site repo's CI then validates the files again before
 anyone merges them. Everything goes through ``git`` and the GitHub CLI
 (``gh``), using whatever account ``gh`` is logged into.
 """
@@ -41,6 +42,7 @@ class Submission:
     source: Path
     target: str  # path inside the site repo, e.g. results/my-machine/<run_id>.json
     summary: str
+    sidecar: bool = False  # a run's per-trial file, sent along with its result
 
 
 def _summary(data: dict) -> str:
@@ -75,16 +77,47 @@ def plan(paths: list[Path], results_dir: Path, validate) -> list[Submission]:
         data = json.loads(resolved.read_text())
         validate(resolved, data)
         submissions.append(Submission(resolved, (Path("results") / relative).as_posix(), _summary(data)))
+        trials = _trials_file(results_dir, relative)
+        if trials is not None:
+            submissions.append(Submission(
+                trials, (Path("results") / trials.relative_to(results_dir)).as_posix(),
+                "per-trial measurements", sidecar=True,
+            ))
     if not submissions:
         raise SubmitError("nothing to submit")
     return submissions
 
 
+def _trials_file(results_dir: Path, relative: Path) -> Path | None:
+    """The per-trial file saved next to a model or router result, if any.
+
+    Only <profile>/<run_id>.json results have one (results_store.save_trials).
+    A file whose run_id doesn't match, or that has no trials list, is refused
+    rather than silently sent along.
+    """
+    if len(relative.parts) != 2:
+        return None
+    path = results_dir / relative.parts[0] / "trials" / relative.name
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise SubmitError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict) or data.get("run_id") != relative.stem or not isinstance(data.get("trials"), list):
+        raise SubmitError(f"{path} is not the per-trial file of {relative.stem}")
+    return path
+
+
 def pr_text(submissions: list[Submission]) -> tuple[str, str]:
-    profiles = sorted({Path(s.target).parts[1] for s in submissions})
-    title = f"Add {len(submissions)} result(s) from {', '.join(profiles)}"
+    results = [s for s in submissions if not s.sidecar]
+    sidecars = len(submissions) - len(results)
+    profiles = sorted({Path(s.target).parts[1] for s in results})
+    title = f"Add {len(results)} result(s) from {', '.join(profiles)}"
     lines = ["Submitted with `lemonmatrix submit`.", ""]
-    lines += [f"- `{s.target}`: {s.summary}" for s in submissions]
+    lines += [f"- `{s.target}`: {s.summary}" for s in results]
+    if sidecars:
+        lines += ["", f"With the per-trial file of {sidecars} run(s) under `trials/`."]
     return title, "\n".join(lines) + "\n"
 
 

@@ -2079,8 +2079,9 @@ def submit_results(paths: tuple[str, ...], results_dir: str, repo: str, dry_run:
 
     Validates each file against the same schemas the leaderboard's CI uses,
     then forks the repo (or reuses your fork), branches from its main, copies
-    the files to the same results/<profile>/... paths, pushes and opens the
-    PR. Needs git and the GitHub CLI (gh) logged in.
+    the files to the same results/<profile>/... paths, with each run's
+    per-trial file from <profile>/trials/ when there is one, pushes and opens
+    the PR. Needs git and the GitHub CLI (gh) logged in.
 
     \b
       lemonmatrix submit results/my-machine/<run_id>.json --dry-run

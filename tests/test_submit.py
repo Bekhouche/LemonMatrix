@@ -163,3 +163,50 @@ def test_cli_refuses_a_file_that_fails_its_schema(tmp_path):
 
     assert result.exit_code != 0
     assert "fails schema validation" in result.output
+
+
+def _trials(results_dir: Path, profile: str, run_id: str) -> Path:
+    return _write(results_dir, f"{profile}/trials/{run_id}.json", {"run_id": run_id, "trials": [{"ttft_ms": 5.0}]})
+
+
+def test_plan_sends_each_runs_per_trial_file_along(tmp_path):
+    results = tmp_path / "results"
+    run = _write(results, "box/run-1.json", RESULT)
+    lone = _write(results, "box/run-2.json", RESULT)  # saved without a trials file
+    tts = _write(results, "box/tts/run-3.json", {"model": {"name": "kokoro"}, "config": {}})
+    _trials(results, "box", "run-1")
+
+    subs = plan([run, lone, tts], results, _accept)
+
+    assert [(s.target, s.sidecar) for s in subs] == [
+        ("results/box/run-1.json", False),
+        ("results/box/trials/run-1.json", True),
+        ("results/box/run-2.json", False),
+        ("results/box/tts/run-3.json", False),
+    ]
+    title, body = pr_text(subs)
+    assert title == "Add 3 result(s) from box"
+    assert "per-trial file of 1 run(s)" in body
+    assert "trials/run-1.json" not in body.split("With the")[0]
+
+
+def test_plan_refuses_a_trials_file_that_belongs_to_another_run(tmp_path):
+    results = tmp_path / "results"
+    run = _write(results, "box/run-1.json", RESULT)
+    _write(results, "box/trials/run-1.json", {"run_id": "someone-else", "trials": []})
+
+    with pytest.raises(SubmitError, match="not the per-trial file"):
+        plan([run], results, _accept)
+
+
+def test_submit_copies_the_trials_file_into_the_pr(tmp_path):
+    results = tmp_path / "results"
+    run = _write(results, "box/run-1.json", RESULT)
+    _trials(results, "box", "run-1")
+    gh = FakeGitHub(fork_exists=True)
+
+    submit(plan([run], results, _accept), "owner/site", runner=gh)
+
+    assert gh.added == ["results/box/run-1.json", "results/box/trials/run-1.json"]
+    commit = next(c for c in gh.calls if c[:2] == ["git", "commit"])
+    assert commit[-1] == "Add 1 result(s) from box"
