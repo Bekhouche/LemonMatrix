@@ -108,6 +108,24 @@ of a small local model for the same prompt. The extra requests run outside the
 measured window; `--estimate-baseline` skips them and reuses the routed
 model's token counts, and the result's `baseline_method` says which was used.
 
+## Omni workflow runs
+
+A Lemonade `collection.omni` model (for example `LMX-Omni-5.5B-Lite`: an LLM
+planner plus image, speech and transcription models) takes a chat request and
+runs the tool loop itself, returning images and audio embedded in the answer.
+`lemonmatrix omni` sends it a fixed task set (`omni-basic`: text, image,
+speech, and image plus speech) and measures each task end to end:
+
+```bash
+lemonmatrix omni --profile my-machine --model LMX-Omni-5.5B-Lite --power-state plugged --unload-others
+```
+
+The result has the success rate (did the answer contain the image and/or
+audio the task asked for), latency per category and tasks per minute. The
+omni model's components count as the run's own models; anything else loaded
+makes the run invalid, as for every other run. Results go to
+`results/<profile>/omni/`.
+
 ## Ryzen AI NPU and hybrid runs
 
 Lemonade's `ryzenai-llm` recipe has one backend, `ryzenai-llm-npu`, and the

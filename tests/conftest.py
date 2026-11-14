@@ -191,12 +191,32 @@ FAKE_ROUTE_TRACE = {
     "trace": [],
 }
 
+# A collection.omni model: the server runs the tool loop and embeds media in
+# the answer as data URIs (images as markdown, audio inside <audio> tags, as
+# seen live on LMX-Omni-5.5B-Lite). FAKE_OMNI_DROP lists media to leave out,
+# so tests can produce a task that did not deliver.
+FAKE_OMNI_MODEL_ID = "LMX-Omni-Test"
+FAKE_OMNI_COMPONENTS = ["Qwen3.5-4B-MTP-GGUF", "SD-Turbo", "Whisper-Tiny", "kokoro-v1"]
+FAKE_OMNI_DROP: set = set()
+
+
+def fake_omni_content(prompt: str) -> str:
+    text = prompt.lower()
+    parts = ["Here you go."]
+    if ("draw" in text or "image" in text) and "image" not in FAKE_OMNI_DROP:
+        parts.append("![image](data:image/png;base64,iVBORw0KGgo=)")
+    if ("aloud" in text or "out loud" in text or "say" in text) and "audio" not in FAKE_OMNI_DROP:
+        parts.append("<audio>\ndata:audio/wav;base64,UklGRg==\n</audio>")
+    return "\n\n".join(parts)
+
+
 FAKE_SYSTEM_STATS = {"cpu_percent": 12.0, "memory_gb": 24.0, "gpu_percent": 80.0, "vram_gb": 9.5, "npu_percent": None}
 
 FAKE_MODELS = {
     "object": "list",
     "data": [
         {"id": "Llama-3.1-8B-Instruct-GGUF", "object": "model"},
+        {"id": FAKE_OMNI_MODEL_ID, "object": "model", "recipe": "collection.omni", "components": FAKE_OMNI_COMPONENTS},
         {
             "id": "Qwen3.8-27B-GGUF-Q4_K_M",
             "object": "model",
@@ -456,6 +476,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/v1/chat/completions":
             payload = json.loads(body or b"{}")
             resp: dict = {"id": "cmpl-fake", "choices": [{"message": {"content": "A keeper finds a note..."}}]}
+            if payload.get("model") == FAKE_OMNI_MODEL_ID:
+                prompt = (payload.get("messages") or [{}])[-1].get("content") or ""
+                resp["choices"][0]["message"]["content"] = fake_omni_content(prompt)
             # If the caller passed route_trace: true, append a fake x_lemonade_route block
             # so that bench.py's router path can capture per-trial routing decisions.
             if payload.get("route_trace"):

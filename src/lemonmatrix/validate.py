@@ -161,3 +161,16 @@ def validate_imported_result(result: dict) -> None:
     model/router leaderboard.
     """
     jsonschema.validate(instance=result, schema=load_imported_schema())
+
+
+def load_omni_schema() -> dict:
+    return _load_schema("omni_result.schema.json")
+
+
+def validate_omni_result(result: dict) -> None:
+    """Raises jsonschema.ValidationError if `result` doesn't conform.
+
+    Separate from validate_result(): an omni task spans several models and
+    tool calls, so its latency is not comparable to LLM token throughput.
+    """
+    jsonschema.validate(instance=result, schema=load_omni_schema())

@@ -20,6 +20,7 @@ from .capabilities import (available_backends, available_compute_engines, availa
                            is_router_model, validate_combo_against_profile)
 from .client import BENCH_TIMEOUT, LemonadeClient, job_progress_percent
 from .discover import QUICK_SELECT_PORTS, expand_subnet, scan, scan_localhost
+from .omni import OMNI_TASK_SETS, OmniConfig, run_omni
 from .importers import LEMONADE_BENCH_SITE, LEMONADE_LAB, LEMONMETRICS, import_documents
 from .profile import DEFAULT_PORT, DEFAULT_PROFILE_DIR, Profile, build_url, connect_and_save
 from .prompt_sets import PROMPT_SETS, load_prompt_file
@@ -29,12 +30,13 @@ from .results_store import (list_audiogen_results, list_classify_results, list_e
                              load_trials, results_to_csv, save_audiogen_result, save_classify_result,
                              save_embeddings_result, save_imagegen_result, save_imported_result,
                              save_meshgen_result, save_rerank_result, save_stt_result, save_trials,
-                             save_tts_result)
+                             save_tts_result, list_omni_results, save_omni_result)
 from .routing_cost import parse_cost_override
 from .submit import DEFAULT_SITE_REPO, SubmitError, plan, pr_text, submit
 from .validate import (validate_audiogen_result, validate_classify_result, validate_embeddings_result,
                         validate_imagegen_result, validate_imported_result, validate_meshgen_result,
-                        validate_rerank_result, validate_result, validate_stt_result, validate_tts_result)
+                        validate_rerank_result, validate_result, validate_stt_result, validate_tts_result,
+                        validate_omni_result)
 
 
 def _router_cost_options(func):
@@ -757,6 +759,84 @@ def classify_results(results_dir: str, profile_name: str | None) -> None:
             f"{r['metrics']['latency_ms']:.1f} ms  "
             f"{r['metrics']['classifications_per_sec']:.2f}/sec{flag}"
         )
+
+
+@cli.command("omni")
+@click.option("--profile", "profile_name", required=True, help="Saved profile name (see `lemonmatrix profile list`).")
+@click.option("--model", "model_name", required=True, help="A collection.omni model, e.g. LMX-Omni-5.5B-Lite.")
+@click.option("--power-state", type=click.Choice(["plugged", "battery", "power_capped"]), required=True)
+@click.option("--power-cap-w", type=float, default=None)
+@click.option("--task-set", type=click.Choice(sorted(OMNI_TASK_SETS)), default="omni-basic", show_default=True)
+@click.option("--warmup-passes", type=int, default=1, show_default=True,
+              help="Passes over the task set before measuring (loads every component).")
+@click.option("--passes", "measured_passes", type=int, default=3, show_default=True,
+              help="Measured passes over the task set.")
+@click.option("--max-tokens", type=int, default=512, show_default=True)
+@click.option("--exclusive/--not-exclusive", "exclusive_run", default=True)
+@click.option("--unload-others", is_flag=True, default=False,
+              help="Unload every model on the instance first. Off by default: the instance may be serving other people.")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False), default="results", show_default=True)
+def omni(profile_name: str, model_name: str, power_state: str, power_cap_w: float | None, task_set: str,
+         warmup_passes: int, measured_passes: int, max_tokens: int, exclusive_run: bool, unload_others: bool,
+         out_dir: str) -> None:
+    """Benchmark an omni model end to end: text, image, speech and mixed tasks.
+
+    Each task goes to the collection.omni model as one chat request; Lemonade
+    runs the tool loop server-side. Measures end-to-end latency per task and
+    whether the answer contains the image and/or audio the task asked for.
+    Results go to results/<profile>/omni/, never to the model leaderboard.
+
+    \b
+      lemonmatrix omni --profile r9700 --model LMX-Omni-5.5B-Lite --power-state plugged --unload-others
+    """
+    try:
+        prof = Profile.load(profile_name)
+    except FileNotFoundError:
+        raise click.ClickException(f"No profile named '{profile_name}'. See `lemonmatrix profile list`.")
+    run_os = host_os(prof.environment)
+    if not run_os:
+        raise click.ClickException(f"Could not determine profile '{profile_name}'s OS. Run `lemonmatrix profile refresh {profile_name}` first.")
+    client = LemonadeClient(prof.base_url, api_key=prof.api_key, timeout=BENCH_TIMEOUT)
+    cfg = OmniConfig(model_name=model_name, os=run_os, power_state=power_state, task_set=task_set,
+                     warmup_passes=warmup_passes, measured_passes=measured_passes, max_tokens=max_tokens,
+                     power_cap_w=power_cap_w, exclusive_run=exclusive_run, unload_others=unload_others)
+    tasks = len(OMNI_TASK_SETS[task_set])
+    click.echo(f"Running {measured_passes} pass(es) of {tasks} tasks ({warmup_passes} warmup) on {model_name} on '{profile_name}'...")
+    try:
+        result, raw_trials = run_omni(client, prof.environment, cfg)
+    except (ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
+        validate_omni_result(result)
+    except jsonschema.ValidationError as exc:
+        click.secho("Result failed schema validation, not writing it out:", fg="red")
+        raise click.ClickException(str(exc)) from exc
+    result_path = save_omni_result(out_dir, profile_name, result)
+    save_trials(out_dir, profile_name, result["run_id"], raw_trials)
+    click.secho(f"Wrote {result_path}", fg="green")
+    m = result["metrics"]
+    click.echo(f"success: {m['success_rate'] * 100:.0f}%   {m['tasks_per_minute']:.1f} tasks/min   "
+               f"latency p50 {m['latency_ms_p50'] / 1000:.1f} s")
+    for name, c in m["by_category"].items():
+        click.echo(f"  {name:13} {c['success_rate'] * 100:4.0f}% ok   p50 {c['latency_ms_p50'] / 1000:5.1f} s   "
+                   f"images {c['images']}  audio {c['audio']}")
+    if not result["validity"]["valid"]:
+        click.secho(f"Marked invalid: {result['validity'].get('notes', '')}", fg="yellow")
+
+
+@cli.command("omni-results")
+@click.option("--results-dir", type=click.Path(file_okay=False), default="results", show_default=True)
+def omni_results(results_dir: str) -> None:
+    """List saved omni benchmark results."""
+    rows = list_omni_results(results_dir)
+    if not rows:
+        click.echo("No omni results. See `lemonmatrix omni --help`.")
+        return
+    for r in rows:
+        m = r["metrics"]
+        click.echo(f"{r['timestamp'][:19]}  {r['_profile']}  {r['model']['name']}  "
+                   f"success {m['success_rate'] * 100:.0f}%  {m['tasks_per_minute']:.1f} tasks/min  "
+                   f"{'valid' if r['validity']['valid'] else 'invalid'}")
 
 
 @cli.command("tts")
@@ -1906,6 +1986,7 @@ _SUBMISSION_MODALITY_VALIDATORS = {
     "embeddings": validate_embeddings_result,
     "rerank": validate_rerank_result,
     "meshgen": validate_meshgen_result,
+    "omni": validate_omni_result,
 }
 # Sidecars, not part of the public leaderboard's data contract -- failures/
 # aren't schema-conformant results at all, and trials/ are raw per-trial

@@ -538,3 +538,29 @@ def list_imported_results(results_dir: Path | str) -> list[dict]:
         except (json.JSONDecodeError, OSError):
             continue
     return sorted(results, key=lambda r: r.get("measured_at") or "", reverse=True)
+
+
+def save_omni_result(results_dir: Path | str, profile: str, result: dict) -> Path:
+    """Persist an omni run as <results_dir>/<profile>/omni/<run_id>.json (never on the model leaderboard)."""
+    out_dir = Path(results_dir) / profile / "omni"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{result['run_id']}.json"
+    path.write_text(json.dumps(result, indent=2))
+    return path
+
+
+def list_omni_results(results_dir: Path | str, profile: str | None = None) -> list[dict]:
+    """All persisted omni results, newest first."""
+    results_dir = Path(results_dir)
+    if not results_dir.exists():
+        return []
+    results = []
+    for path in results_dir.glob(f"{profile}/omni/*.json" if profile else "*/omni/*.json"):
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        data["_profile"] = path.parent.parent.name
+        results.append(data)
+    results.sort(key=lambda d: d.get("timestamp", ""), reverse=True)
+    return results

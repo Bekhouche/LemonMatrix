@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lemonmatrix.github.io/schema/omni_result.schema.json",
+  "title": "LemonMatrix Omni Workflow Benchmark Result",
+  "description": "One run of a fixed task set against a Lemonade collection.omni model (an LLM planner plus image, speech and transcription models), with the tool loop run server-side. Measures end-to-end task latency and whether each task produced the media it asked for. Kept apart from result.schema.json: a task spans several models and tool calls, so it is not comparable to LLM token throughput.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_type",
+    "run_id",
+    "timestamp",
+    "model",
+    "config",
+    "environment",
+    "metrics",
+    "validity"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "run_type": {
+      "type": "string",
+      "const": "omni"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this run (UUID recommended)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the run started."
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "name",
+        "components"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The collection.omni model, e.g. LMX-Omni-5.5B-Lite."
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Its component models (planner LLM, image, ASR, TTS)."
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "required": [
+        "os",
+        "power_state"
+      ],
+      "additionalProperties": false,
+      "description": "No engine or backend: each component runs on its own, chosen by Lemonade.",
+      "properties": {
+        "os": {
+          "type": "string",
+          "enum": [
+            "windows",
+            "linux",
+            "macos",
+            "docker"
+          ]
+        },
+        "power_state": {
+          "type": "string",
+          "enum": [
+            "plugged",
+            "battery",
+            "power_capped"
+          ]
+        },
+        "power_cap_w": {
+          "type": "number",
+          "description": "Applied power cap in watts, if power_state is power_capped."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "max_tokens of each request."
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "description": "Fingerprint of the machine and software stack. Auto-discovered from the profile. Required for any run to be comparable.",
+      "required": [
+        "device_model",
+        "cpu",
+        "memory_gb",
+        "os_version",
+        "driver_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device_model": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "string"
+        },
+        "igpu": {
+          "type": "string"
+        },
+        "igpu_family": {
+          "type": "string",
+          "description": "AMD GPU ROCm architecture codename, e.g. gfx1151."
+        },
+        "dgpu": {
+          "type": "string"
+        },
+        "dgpu_family": {
+          "type": "string",
+          "description": "AMD GPU ROCm architecture codename, e.g. gfx950 -- confirmed more reliable than name for at least one real datacenter card whose name field was a bare numeric string."
+        },
+        "npu": {
+          "type": "string"
+        },
+        "memory_gb": {
+          "type": "number"
+        },
+        "memory_type": {
+          "type": "string"
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "driver_version": {
+          "type": "string"
+        },
+        "rocm_version": {
+          "type": "string"
+        },
+        "backend_version": {
+          "type": "string",
+          "description": "Version of the underlying TTS engine build, if Lemonade reports it as installed."
+        },
+        "lemonade_version": {
+          "type": "string"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "task_set",
+        "task_count",
+        "trial_count",
+        "success_rate",
+        "tasks_per_minute",
+        "latency_ms",
+        "latency_ms_p50",
+        "by_category"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task_set": {
+          "type": "string",
+          "description": "Built-in task set, e.g. omni-basic."
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trial_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Measured requests that returned (failed requests are left out)."
+        },
+        "success_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of measured tasks, failed requests included, whose answer contained every medium the task asked for."
+        },
+        "tasks_per_minute": {
+          "type": "number",
+          "minimum": 0,
+          "description": "60000 / mean task latency."
+        },
+        "latency_ms": {
+          "type": "number",
+          "description": "Mean end-to-end time of one task, measured client-side around the request."
+        },
+        "latency_ms_p50": {
+          "type": "number"
+        },
+        "latency_ms_p95": {
+          "type": "number"
+        },
+        "latency_ms_stddev": {
+          "type": "number"
+        },
+        "peak_memory_gb": {
+          "type": "number"
+        },
+        "by_category": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "requests",
+              "success_rate",
+              "latency_ms",
+              "latency_ms_p50",
+              "images",
+              "audio"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "requests": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "success_rate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "latency_ms": {
+                "type": "number",
+                "description": "Mean end-to-end time of one task, measured client-side around the request."
+              },
+              "latency_ms_p50": {
+                "type": "number"
+              },
+              "latency_ms_p95": {
+                "type": "number"
+              },
+              "latency_ms_stddev": {
+                "type": "number"
+              },
+              "images": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Images embedded in this category's answers."
+              },
+              "audio": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Audio clips embedded in this category's answers."
+              }
+            }
+          }
+        }
+      }
+    },
+    "validity": {
+      "type": "object",
+      "description": "Confounder controls. A run that fails a gate must set valid=false and record why.",
+      "required": [
+        "valid",
+        "warmup_discarded",
+        "exclusive_run"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "valid": {
+          "type": "boolean",
+          "description": "False if any hard gate failed. Invalid runs are shown but never ranked."
+        },
+        "warmup_discarded": {
+          "type": "boolean",
+          "description": "True if warmup iterations were excluded from timing."
+        },
+        "exclusive_run": {
+          "type": "boolean",
+          "description": "True if no competing model workload ran during measurement, per server-verified /api/v1/health polling where possible."
+        },
+        "model_reload_free": {
+          "type": "boolean",
+          "description": "True if the model stayed resident for the whole run (no reload tax)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Any flags, caveats, or reasons a gate failed."
+        }
+      }
+    }
+  }
+}
