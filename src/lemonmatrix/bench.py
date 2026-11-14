@@ -32,7 +32,7 @@ import requests
 
 from .backend_version import lookup_backend_version, resolve_backend
 from .capabilities import engine_backend_compatible, expected_engine_for_model, parse_quantization
-from .client import LemonadeClient
+from .client import LemonadeAPIError, LemonadeClient
 from .routing_cost import CLOUD_RECIPE, summarize_routing
 
 STATS_TTFT_IS_SECONDS = True
@@ -463,15 +463,30 @@ def run_sweep(
     client.load(cfg.model_name, **load_kwargs)
 
     exclusivity = _ExclusivityMonitor(client, own_model_names)
+    failed: list[dict] = []
     with exclusivity:
         for i in range(cfg.warmup_trials):
-            _run_one(client, _trial_cfg(cfg, i))
+            try:
+                _run_one(client, _trial_cfg(cfg, i))
+            except requests.RequestException:
+                pass  # a warmup only has to warm up
 
         # The model stays resident for every measured trial, so model_reload_free
         # holds for the whole run -- there is no unload here by design.
+        # A request that fails (e.g. a cloud reply Lemonade answers with 500)
+        # is recorded and left out instead of ending the run.
         raw_trials = []
         for i in range(cfg.measured_trials):
-            trial = _run_one(client, _trial_cfg(cfg, i))
+            try:
+                trial = _run_one(client, _trial_cfg(cfg, i))
+            except requests.RequestException as exc:
+                if len(failed) == i and i + 1 >= min(3, cfg.measured_trials):
+                    raise  # nothing has worked yet: a broken setup, not a bad request
+                # Lemonade's own message; other errors by type only, since their text
+                # carries the server's address and notes get published.
+                error = str(exc) if isinstance(exc, LemonadeAPIError) else type(exc).__name__
+                failed.append({"trial": i, "error": error[:200]})
+                continue
             if cfg.prompts:
                 trial["prompt_index"] = i % len(cfg.prompts)
             raw_trials.append(trial)
@@ -484,7 +499,12 @@ def run_sweep(
         client, environment, cfg, raw_trials, exclusivity, system_info,
         engine_ok, engine_reason, backend_unresolved_note, is_router,
         candidate_recipes=candidate_recipes, baseline_tokens=baseline_tokens,
+        failed_trials=failed,
     )
+
+
+# Above this share of failed measured requests a run is not ranked.
+MAX_FAILED_SHARE = 0.05
 
 
 def _measure_baseline(
@@ -542,6 +562,7 @@ def _aggregate_sweep_result(
     is_router: bool,
     candidate_recipes: dict[str, str] | None = None,
     baseline_tokens: dict[int, tuple[int, int]] | None = None,
+    failed_trials: list[dict] | None = None,
 ) -> tuple[dict, list[dict]]:
     """Turns raw_trials (in _run_one()'s dict shape: ttft_ms,
     decode_tokens_per_sec, prompt_tokens, output_tokens, watts, vram_gb,
@@ -717,6 +738,14 @@ def _aggregate_sweep_result(
     others_resident, resident_note = _resident_verdict(exclusivity)
     if resident_note:
         notes.append(resident_note)
+    failed_trials = failed_trials or []
+    attempted = len(raw_trials) + len(failed_trials)
+    failures_ok = not attempted or len(failed_trials) / attempted <= MAX_FAILED_SHARE
+    if failed_trials:
+        notes.append(
+            f"{len(failed_trials)} of {attempted} measured requests failed and are left out of every metric"
+            f"{'' if failures_ok else ' -- not ranked'} (first: {failed_trials[0]['error']})"
+        )
     if not engine_ok:
         notes.append(f"engine/backend mismatch: {engine_reason}")
     if mean_watts is None:
@@ -742,6 +771,7 @@ def _aggregate_sweep_result(
         "valid": (
             thermal_ok and exclusive_run and not backend_unresolved_note and engine_ok and device_ok
             and model_reload_free and quantization_ok and cache_ok and others_resident is not True
+            and failures_ok
         ),
         "warmup_discarded": cfg.warmup_trials > 0,
         "thermal_ok": thermal_ok,
