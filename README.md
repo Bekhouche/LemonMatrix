@@ -7,6 +7,7 @@ fingerprint for every run on that machine. See
 schema.
 
 **Live public leaderboard: [lemonmatrix.github.io](https://lemonmatrix.github.io)**
+· **[Demo video (3 min)](https://www.youtube.com/watch?v=36J3A6Zr4Jc)**
 -- results and the site's own generator live in the sibling
 [LemonMatrix/lemonmatrix.github.io](https://github.com/LemonMatrix/lemonmatrix.github.io)
 repo; this repo is code (CLI, library, tests, schema) only. Community
