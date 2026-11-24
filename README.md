@@ -127,6 +127,19 @@ omni model's components count as the run's own models; anything else loaded
 makes the run invalid, as for every other run. Results go to
 `results/<profile>/omni/`.
 
+## Apple silicon
+
+Lemonade reports an Apple GPU as a `metal` device. It shares memory with the
+CPU, so LemonMatrix treats it as an integrated GPU: use `--engine igpu` with a
+`-metal` backend (`llamacpp-metal`, `whispercpp-metal`, `sd-cpp-metal`):
+
+```bash
+lemonmatrix run --profile my-mac \
+  --model Qwen3-1.7B-GGUF --model-class dense --quant Q4_0 \
+  --context-length 4096 --engine igpu --backend llamacpp-metal \
+  --power-state plugged
+```
+
 ## Ryzen AI NPU and hybrid runs
 
 Lemonade's `ryzenai-llm` recipe has one backend, `ryzenai-llm-npu`, and the

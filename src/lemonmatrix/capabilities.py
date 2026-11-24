@@ -289,8 +289,11 @@ def available_compute_engines(system_info: dict) -> list[str]:
     has_igpu = any(g.get("available") and is_integrated_gpu(g) for g in amd_gpus)
     has_amd_dgpu = any(g.get("available") and not is_integrated_gpu(g) for g in amd_gpus)
     has_nvidia_dgpu = any(g.get("available") for g in _as_list(devices.get("nvidia_gpu")))
+    # Apple silicon: Lemonade reports the GPU under "metal". It shares memory
+    # with the CPU, so it counts as an integrated GPU.
+    has_metal_igpu = any(g.get("available") for g in _as_list(devices.get("metal")))
 
-    if has_igpu:
+    if has_igpu or has_metal_igpu:
         engines.append("igpu")
     if has_amd_dgpu or has_nvidia_dgpu:
         engines.append("dgpu")

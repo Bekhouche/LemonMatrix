@@ -99,3 +99,39 @@ def test_discover_environment_ignores_unavailable_npu_with_bogus_name():
     # field with the CPU name -- must not be mistaken for a real NPU.
     environment, _ = discover_environment(_StubClient(REAL_SYSTEM_INFO, REAL_HEALTH))
     assert "npu" not in environment
+
+
+APPLE_SYSTEM_INFO = {
+    "OS Version": "macOS 26.7.3 Darwin Kernel Version 25.6.0",
+    "Physical Memory": "32 GB",
+    "Processor": "Apple M5",
+    "devices": {
+        "amd_gpu": [],
+        "amd_npu": {
+            "available": False,
+            "error": "NPU not supported on macOS (Ryzen AI NPUs are Windows/Linux only)",
+            "family": "",
+            "name": "Apple M5",
+            "utilization": 0.0,
+        },
+        "cpu": {"available": True, "cores": 10, "family": "arm64", "name": "Apple M5", "threads": 10},
+        "metal": {
+            "available": True,
+            "driver_version": "Metal",
+            "family": "metal",
+            "name": "Apple M5",
+            "vram_gb": 24.96,
+        },
+        "nvidia_gpu": [{"available": False, "error": "NVIDIA GPUs not detected on macOS", "name": ""}],
+    },
+}
+
+APPLE_HEALTH = {"status": "ok", "version": "2026.47.1", "model_loaded": None, "all_models_loaded": []}
+
+
+def test_discover_environment_reports_apple_metal_gpu_as_igpu():
+    environment, _ = discover_environment(_StubClient(APPLE_SYSTEM_INFO, APPLE_HEALTH))
+    assert environment["igpu"] == "Apple M5"
+    assert "dgpu" not in environment
+    assert environment["driver_version"] == "Metal"
+    assert environment["lemonade_version"] == "2026.47.1"
