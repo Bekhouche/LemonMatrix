@@ -187,3 +187,30 @@ def test_parse_quantization_keeps_plain_and_custom_variants():
 
 def test_parse_quantization_returns_nothing_for_onnx_npu_checkpoints():
     assert parse_quantization("AMD-OLMo-1B-SFT-DPO-Hybrid", "amd/AMD-OLMo-1B-SFT-DPO-onnx-ryzenai-1.7-hybrid") == ""
+
+
+# Real devices block from Lemonade 2026.47.1 on a MacBook with an Apple M5.
+APPLE_SYSTEM_INFO = {
+    "devices": {
+        "amd_gpu": [],
+        "amd_npu": {"available": False, "name": "Apple M5"},
+        "cpu": {"available": True, "name": "Apple M5", "family": "arm64"},
+        "metal": {
+            "available": True,
+            "driver_version": "Metal",
+            "family": "metal",
+            "name": "Apple M5",
+            "vram_gb": 24.96,
+        },
+        "nvidia_gpu": [{"available": False, "name": ""}],
+    },
+}
+
+
+def test_available_compute_engines_treats_apple_metal_as_igpu():
+    assert available_compute_engines(APPLE_SYSTEM_INFO) == ["cpu", "igpu"]
+
+
+def test_available_compute_engines_ignores_unavailable_metal():
+    info = {"devices": {"cpu": {"available": True}, "metal": {"available": False, "name": ""}}}
+    assert available_compute_engines(info) == ["cpu"]

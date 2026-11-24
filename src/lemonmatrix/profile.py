@@ -16,6 +16,8 @@ other Lemonade version or platform uses it, and falls back to "unknown"
 rather than crashing. Callers can override anything discovery got wrong via
 CLI flags. Each amd_gpu entry carries an "integrated" flag (seen on 11.6 and
 on 2026.47); see is_integrated_gpu below for the fallback when it is absent.
+On Apple silicon (Lemonade 2026.47.1, macOS 26) the GPU is a "metal" entry
+under "devices"; it is treated as an integrated GPU.
 """
 
 from __future__ import annotations
@@ -119,6 +121,18 @@ def _classify_gpus(devices: dict) -> tuple[str | None, str | None, str | None, s
             igpu_names.append(name)
             if family:
                 igpu_families.append(family)
+        driver_version = driver_version or gpu.get("driver_version")
+
+    # Apple silicon reports its GPU under "metal". It shares memory with the
+    # CPU, so it is an integrated GPU.
+    metal_gpus = devices.get("metal") or []
+    if isinstance(metal_gpus, dict):
+        metal_gpus = [metal_gpus]
+    for gpu in metal_gpus:
+        name = gpu.get("name")
+        if not gpu.get("available", True) or not name:
+            continue
+        igpu_names.append(name)
         driver_version = driver_version or gpu.get("driver_version")
 
     nvidia_gpus = devices.get("nvidia_gpu") or []
